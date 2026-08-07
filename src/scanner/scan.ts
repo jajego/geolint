@@ -105,6 +105,10 @@ function object(value: JsonValue, path: JsonPointer): JsonObject {
   return value;
 }
 
+function ownMember(object: JsonObject, key: string): JsonValue | undefined {
+  return Object.hasOwn(object, key) ? object[key] : undefined;
+}
+
 function array(value: JsonValue | undefined, path: JsonPointer): JsonValue[] {
   if (!Array.isArray(value)) fail(`Expected an array at ${path}.`);
   return value;
@@ -394,7 +398,10 @@ function scanGeometry(
   state: ScanState,
 ): GeometryMetrics {
   const geometry = object(value, path);
-  const type = geometryType(geometry.type, appendPointer(path, 'type'));
+  const type = geometryType(
+    ownMember(geometry, 'type'),
+    appendPointer(path, 'type'),
+  );
   const metrics: GeometryMetrics = {
     type,
     path,
@@ -408,7 +415,7 @@ function scanGeometry(
     increment(state.geometryNodeTypes, type);
   if (type === 'GeometryCollection') {
     const geometriesPath = appendPointer(path, 'geometries');
-    const geometries = array(geometry.geometries, geometriesPath);
+    const geometries = array(ownMember(geometry, 'geometries'), geometriesPath);
     for (let index = 0; index < geometries.length; index += 1) {
       const child = scanGeometry(
         geometries[index] as JsonValue,
@@ -425,7 +432,10 @@ function scanGeometry(
     }
   } else if (state.requirements.positions || state.requirements.ringCounts) {
     const coordinatesPath = appendPointer(path, 'coordinates');
-    const coordinates = array(geometry.coordinates, coordinatesPath);
+    const coordinates = array(
+      ownMember(geometry, 'coordinates'),
+      coordinatesPath,
+    );
     if (state.requirements.positions) {
       scanCoordinateTree(
         type,
@@ -496,7 +506,7 @@ function scanFeature(
   state: ScanState,
 ): void {
   const feature = object(value, path);
-  if (feature.type !== 'Feature')
+  if (ownMember(feature, 'type') !== 'Feature')
     fail(`Expected Feature at ${appendPointer(path, 'type')}.`);
   state.featureCount += 1;
   state.listener?.featureStart?.({ index, path });
@@ -504,10 +514,15 @@ function scanFeature(
   const needsProperties =
     state.requirements.propertyNames || Boolean(state.listener?.feature);
   const properties = needsProperties
-    ? scanProperties(feature.properties, propertiesPath, index, state)
+    ? scanProperties(
+        ownMember(feature, 'properties'),
+        propertiesPath,
+        index,
+        state,
+      )
     : { isNull: false, count: 0 };
 
-  const id = feature.id;
+  const id = ownMember(feature, 'id');
   const validId =
     typeof id === 'string' || typeof id === 'number' ? id : undefined;
   if (state.requirements.idStats) {
@@ -524,6 +539,7 @@ function scanFeature(
   }
 
   const geometryPath = appendPointer(path, 'geometry');
+  const geometry = ownMember(feature, 'geometry');
   let metrics: GeometryMetrics | undefined;
   const needsGeometry =
     state.requirements.positions ||
@@ -533,15 +549,15 @@ function scanFeature(
     state.requirements.geometrySummaries;
   if (!needsGeometry) {
     // Phase 3 structural validation will inspect skipped semantic subtrees.
-  } else if (feature.geometry === null) {
+  } else if (geometry === null) {
     if (state.requirements.featureGeometryTypes) {
       increment(state.featureGeometryTypes, 'null');
       state.nullGeometryCount += 1;
     }
-  } else if (feature.geometry === undefined) {
+  } else if (geometry === undefined) {
     fail(`Expected geometry at ${geometryPath}.`);
   } else {
-    metrics = scanGeometry(feature.geometry, geometryPath, index, state);
+    metrics = scanGeometry(geometry, geometryPath, index, state);
     if (state.requirements.featureGeometryTypes)
       increment(state.featureGeometryTypes, metrics.type);
   }
@@ -615,9 +631,10 @@ export function scanGeoJSON(
     fail('Expected a supported GeoJSON root at /type.');
   }
   const root = object(value, jsonPointer());
-  if (root.type === 'FeatureCollection') {
+  const rootType = ownMember(root, 'type');
+  if (rootType === 'FeatureCollection') {
     const featuresPath = jsonPointer('features');
-    const features = array(root.features, featuresPath);
+    const features = array(ownMember(root, 'features'), featuresPath);
     for (let index = 0; index < features.length; index += 1) {
       scanFeature(
         features[index] as JsonValue,
@@ -626,9 +643,9 @@ export function scanGeoJSON(
         state,
       );
     }
-  } else if (root.type === 'Feature') {
+  } else if (rootType === 'Feature') {
     scanFeature(value, jsonPointer(), 0, state);
-  } else if (typeof root.type === 'string' && geometryTypes.has(root.type)) {
+  } else if (typeof rootType === 'string' && geometryTypes.has(rootType)) {
     const needsGeometry =
       requirements.positions ||
       requirements.ringCounts ||

@@ -672,3 +672,220 @@ test('repeated semantic executions are deeply deterministic', () => {
   for (let run = 0; run < 20; run += 1)
     assert.deepEqual(semanticTrace(document), expected);
 });
+
+test('buffered semantic scanning observes only own root geometry members', () => {
+  const value = JSON.parse('{}') as JsonValue;
+  Object.setPrototypeOf(value as object, {
+    type: 'Point',
+    coordinates: [1, 2],
+  });
+  const coordinates: CoordinateEvent[] = [];
+  const geometries: GeometrySummary[] = [];
+  const listener = {
+    coordinate: (event: CoordinateEvent) => coordinates.push(event),
+    geometry: (summary: GeometrySummary) => geometries.push(summary),
+  };
+
+  assert.throws(() =>
+    scanGeoJSON(value, {
+      filePath: '<test>',
+      listener,
+      requirements: createExecutionRequirements({
+        facts: ['vertexCount'],
+        listener,
+      }),
+    }),
+  );
+  assert.deepEqual(coordinates, []);
+  assert.deepEqual(geometries, []);
+});
+
+test('inherited FeatureCollection, Feature ID, properties, and geometry members stay absent', () => {
+  const collection = JSON.parse('{"type":"FeatureCollection"}') as JsonValue;
+  Object.setPrototypeOf(collection as object, {
+    features: [{ type: 'Feature', properties: {}, geometry: point([1, 2]) }],
+  });
+  const starts: number[] = [];
+  const collectionListener = {
+    featureStart: ({ index }: { readonly index: number }) => starts.push(index),
+  };
+  assert.throws(() =>
+    scanGeoJSON(collection, {
+      filePath: '<test>',
+      listener: collectionListener,
+      requirements: createExecutionRequirements({
+        listener: collectionListener,
+      }),
+    }),
+  );
+  assert.deepEqual(starts, []);
+
+  const feature = JSON.parse(
+    '{"type":"Feature","properties":{},"geometry":null}',
+  ) as JsonValue;
+  Object.setPrototypeOf(feature as object, { id: 'inherited-id' });
+  let observedId: string | number | undefined;
+  const featureListener = {
+    feature: ({ id }: { readonly id?: string | number }) => {
+      observedId = id;
+    },
+  };
+  const featureSummary = scanGeoJSON(feature, {
+    filePath: '<test>',
+    listener: featureListener,
+    requirements: createExecutionRequirements({
+      facts: ['idStats'],
+      listener: featureListener,
+    }),
+  });
+  assert.equal(observedId, undefined);
+  assert.deepEqual(featureSummary.ids, {
+    present: 0,
+    missing: 1,
+    duplicateCount: 0,
+    stringCount: 0,
+    numberCount: 0,
+  });
+
+  const missingProperties = JSON.parse(
+    '{"type":"Feature","geometry":null}',
+  ) as JsonValue;
+  Object.setPrototypeOf(missingProperties as object, {
+    properties: { inherited: true },
+  });
+  const properties: PropertyEvent[] = [];
+  const propertyListener = {
+    property: (event: PropertyEvent) => properties.push(event),
+  };
+  assert.throws(() =>
+    scanGeoJSON(missingProperties, {
+      filePath: '<test>',
+      listener: propertyListener,
+      requirements: createExecutionRequirements({ listener: propertyListener }),
+    }),
+  );
+  assert.deepEqual(properties, []);
+
+  const missingGeometry = JSON.parse(
+    '{"type":"Feature","properties":{}}',
+  ) as JsonValue;
+  Object.setPrototypeOf(missingGeometry as object, { geometry: point([1, 2]) });
+  const coordinates: CoordinateEvent[] = [];
+  const geometryListener = {
+    coordinate: (event: CoordinateEvent) => coordinates.push(event),
+  };
+  assert.throws(() =>
+    scanGeoJSON(missingGeometry, {
+      filePath: '<test>',
+      listener: geometryListener,
+      requirements: createExecutionRequirements({
+        facts: ['vertexCount'],
+        listener: geometryListener,
+      }),
+    }),
+  );
+  assert.deepEqual(coordinates, []);
+});
+
+test('inherited control getters are never invoked and own members still win', () => {
+  let invoked = false;
+  const inheritedGetter = Object.defineProperty({}, 'type', {
+    get: () => {
+      invoked = true;
+      throw new Error('inherited getter must not run');
+    },
+  });
+  const absent = JSON.parse('{}') as JsonValue;
+  Object.setPrototypeOf(absent as object, inheritedGetter);
+  assert.throws(() =>
+    scanGeoJSON(absent, {
+      filePath: '<test>',
+      requirements: createExecutionRequirements(),
+    }),
+  );
+  assert.equal(invoked, false);
+
+  const pointValue = JSON.parse(
+    '{"type":"Point","coordinates":[10,20]}',
+  ) as JsonValue;
+  Object.setPrototypeOf(pointValue as object, {
+    type: 'Polygon',
+    coordinates: [
+      [
+        [0, 0],
+        [1, 0],
+        [0, 0],
+      ],
+    ],
+  });
+  const geometries: GeometrySummary[] = [];
+  const listener = {
+    geometry: (summary: GeometrySummary) => geometries.push(summary),
+  };
+  const summary = scanGeoJSON(pointValue, {
+    filePath: '<test>',
+    listener,
+    requirements: createExecutionRequirements({
+      facts: ['vertexCount'],
+      listener,
+    }),
+  });
+  assert.equal(summary.totalVertices, 1);
+  assert.equal(geometries[0]?.type, 'Point');
+  assert.deepEqual(geometries[0]?.path, '');
+});
+
+test('JSON.parse values ignore Object.prototype control members without invoking getters', () => {
+  const previousType = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    'type',
+  );
+  const previousCoordinates = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    'coordinates',
+  );
+  let invoked = false;
+  try {
+    Object.defineProperty(Object.prototype, 'type', {
+      configurable: true,
+      get: () => {
+        invoked = true;
+        throw new Error('inherited getter must not run');
+      },
+    });
+    Object.defineProperty(Object.prototype, 'coordinates', {
+      configurable: true,
+      value: [1, 2],
+    });
+
+    const events: CoordinateEvent[] = [];
+    const listener = {
+      coordinate: (event: CoordinateEvent) => events.push(event),
+    };
+    assert.throws(() =>
+      scanGeoJSON(JSON.parse('{}') as JsonValue, {
+        filePath: '<test>',
+        listener,
+        requirements: createExecutionRequirements({
+          facts: ['vertexCount'],
+          listener,
+        }),
+      }),
+    );
+    assert.equal(invoked, false);
+    assert.deepEqual(events, []);
+  } finally {
+    if (previousType)
+      Object.defineProperty(Object.prototype, 'type', previousType);
+    else delete (Object.prototype as { type?: unknown }).type;
+    if (previousCoordinates) {
+      Object.defineProperty(
+        Object.prototype,
+        'coordinates',
+        previousCoordinates,
+      );
+    } else {
+      delete (Object.prototype as { coordinates?: unknown }).coordinates;
+    }
+  }
+});
