@@ -83,6 +83,7 @@ interface ScanState {
 export interface ScanInstrumentation {
   coordinateTraversals: number;
   positionVisits: number;
+  coordinatePathMaterializations: number;
 }
 
 export interface ScanOptions {
@@ -232,28 +233,51 @@ function geometrySummary(metrics: GeometryMetrics): GeometrySummary {
   };
 }
 
+function positionPath(
+  parentPath: JsonPointer,
+  index: number | undefined,
+  state: ScanState,
+): JsonPointer {
+  if (state.instrumentation) {
+    state.instrumentation.coordinatePathMaterializations += 1;
+  }
+  return index === undefined ? parentPath : appendPointer(parentPath, index);
+}
+
 function visitPosition(
   value: JsonValue,
-  path: JsonPointer,
+  parentPath: JsonPointer,
+  positionIndex: number | undefined,
   featureIndex: number | undefined,
   metrics: GeometryMetrics,
   state: ScanState,
 ): void {
-  const position = array(value, path);
+  if (!Array.isArray(value)) {
+    fail(
+      `Expected an array at ${positionPath(parentPath, positionIndex, state)}.`,
+    );
+  }
+  const position = value;
   if (position.length < 2)
-    fail(`Expected a position with at least two ordinates at ${path}.`);
-  for (let index = 0; index < position.length; index += 1) {
-    const ordinate = position[index];
+    fail(
+      `Expected a position with at least two ordinates at ${positionPath(parentPath, positionIndex, state)}.`,
+    );
+  for (
+    let ordinateIndex = 0;
+    ordinateIndex < position.length;
+    ordinateIndex += 1
+  ) {
+    const ordinate = position[ordinateIndex];
     if (typeof ordinate !== 'number' || !Number.isFinite(ordinate)) {
       fail(
-        `Expected a finite coordinate ordinate at ${appendPointer(path, index)}.`,
+        `Expected a finite coordinate ordinate at ${appendPointer(positionPath(parentPath, positionIndex, state), ordinateIndex)}.`,
       );
     }
   }
 
   if (state.instrumentation) state.instrumentation.positionVisits += 1;
   metrics.vertices += 1;
-  state.totalVertices += 1;
+  if (state.requirements.vertexCounts) state.totalVertices += 1;
   const dimensionKey =
     position.length === 2
       ? 'two'
@@ -261,13 +285,17 @@ function visitPosition(
         ? 'three'
         : 'fourOrMore';
   metrics.dimensions[dimensionKey] += 1;
-  state.dimensions[dimensionKey] += 1;
-  if (state.requirements.geographicExtents) {
+  if (state.requirements.coordinateDimensions) {
+    state.dimensions[dimensionKey] += 1;
+  }
+  if (state.requirements.geometrySummaries) {
     metrics.bounds = updateBounds(
       metrics.bounds,
       position[0] as number,
       position[1] as number,
     );
+  }
+  if (state.requirements.geographicExtents) {
     state.bounds = updateBounds(
       state.bounds,
       position[0] as number,
@@ -278,7 +306,7 @@ function visitPosition(
     state.listener.coordinate({
       ...(featureIndex === undefined ? {} : { featureIndex }),
       values: position as number[],
-      path,
+      path: positionPath(parentPath, positionIndex, state),
     });
   }
 }
@@ -293,7 +321,8 @@ function visitPositions(
   for (let index = 0; index < values.length; index += 1) {
     visitPosition(
       values[index] as JsonValue,
-      appendPointer(path, index),
+      path,
+      index,
       featureIndex,
       metrics,
       state,
@@ -311,7 +340,14 @@ function scanCoordinateTree(
 ): void {
   if (state.instrumentation) state.instrumentation.coordinateTraversals += 1;
   if (type === 'Point') {
-    visitPosition(coordinates, coordinatesPath, featureIndex, metrics, state);
+    visitPosition(
+      coordinates,
+      coordinatesPath,
+      undefined,
+      featureIndex,
+      metrics,
+      state,
+    );
     return;
   }
   if (type === 'MultiPoint' || type === 'LineString') {
@@ -410,9 +446,6 @@ function scanGeometry(
       }
     }
   }
-
-  if (state.listener?.geometry)
-    state.listener.geometry(geometrySummary(metrics));
   return metrics;
 }
 
@@ -497,7 +530,7 @@ function scanFeature(
     state.requirements.ringCounts ||
     state.requirements.geometryNodeCounts ||
     state.requirements.featureGeometryTypes ||
-    Boolean(state.listener?.geometry || state.listener?.feature);
+    state.requirements.geometrySummaries;
   if (!needsGeometry) {
     // Phase 3 structural validation will inspect skipped semantic subtrees.
   } else if (feature.geometry === null) {
@@ -512,10 +545,16 @@ function scanFeature(
     if (state.requirements.featureGeometryTypes)
       increment(state.featureGeometryTypes, metrics.type);
   }
-  state.largestFeatureVertices = Math.max(
-    state.largestFeatureVertices,
-    metrics?.vertices ?? 0,
-  );
+  if (state.requirements.vertexCounts) {
+    state.largestFeatureVertices = Math.max(
+      state.largestFeatureVertices,
+      metrics?.vertices ?? 0,
+    );
+  }
+
+  if (metrics && state.listener?.geometry) {
+    state.listener.geometry(geometrySummary(metrics));
+  }
 
   if (state.listener?.feature) {
     state.listener.feature({
@@ -594,8 +633,11 @@ export function scanGeoJSON(
       requirements.positions ||
       requirements.ringCounts ||
       requirements.geometryNodeCounts ||
-      Boolean(options.listener?.geometry);
-    if (needsGeometry) scanGeometry(value, jsonPointer(), undefined, state);
+      requirements.geometrySummaries;
+    if (needsGeometry) {
+      const metrics = scanGeometry(value, jsonPointer(), undefined, state);
+      options.listener?.geometry?.(geometrySummary(metrics));
+    }
   } else {
     fail('Expected a supported GeoJSON root at /type.');
   }

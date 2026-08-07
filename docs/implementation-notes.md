@@ -41,3 +41,7 @@ dimension category; document-level dimension counts remain all zero.
 The object API follows the strict JSON-data-model boundary selected in the V5
 review: `NaN` and positive or negative infinity are rejected with
 `GEOLINT_INVALID_JSON_VALUE`, rather than entering structural traversal.
+
+Object-API validation currently remains a separate walk before semantic
+scanning. Fusing those walks is deferred until structural validation can do so
+without weakening the input boundary or destabilizing the scanner.

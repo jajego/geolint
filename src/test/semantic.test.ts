@@ -299,10 +299,10 @@ test('all geometry families count vertices, rings, and nested nodes', () => {
   ];
 
   for (const [geometry, vertices, rings, nodes] of cases) {
-    let outer: GeometrySummary | undefined;
+    const observed: GeometrySummary[] = [];
     const listener = {
       geometry: (summary: GeometrySummary) => {
-        outer = summary;
+        observed.push(summary);
       },
     };
     const summary = scanGeoJSON(geometry, {
@@ -310,10 +310,119 @@ test('all geometry families count vertices, rings, and nested nodes', () => {
       listener,
       requirements: createExecutionRequirements({ facts: allFacts, listener }),
     });
+    const outer = observed[0];
+    assert.equal(observed.length, 1);
     assert.equal(summary.totalVertices, vertices);
     assert.equal(outer?.vertices, vertices);
     assert.equal(outer?.ringCount, rings);
     assert.equal(outer?.geometryNodeCount, nodes);
+  }
+});
+
+test('geometry hook dispatches only the completed outer tree while node facts include children', () => {
+  const document: JsonValue = {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'GeometryCollection',
+      geometries: [
+        point([0, 0]),
+        {
+          type: 'GeometryCollection',
+          geometries: [
+            {
+              type: 'LineString',
+              coordinates: [
+                [1, 1],
+                [2, 2],
+                [3, 3],
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const observed: GeometrySummary[] = [];
+  const listener = {
+    geometry: (summary: GeometrySummary) => observed.push(summary),
+  };
+  const summary = scanGeoJSON(document, {
+    filePath: '<test>',
+    listener,
+    requirements: createExecutionRequirements({
+      facts: ['geometryStats'],
+      listener,
+    }),
+  });
+
+  assert.equal(observed.length, 1);
+  assert.deepEqual(observed[0], {
+    type: 'GeometryCollection',
+    path: '/geometry',
+    vertices: 4,
+    ringCount: 0,
+    geometryNodeCount: 4,
+    coordinateDimensions: 2,
+    extent: {
+      west: 0,
+      east: 3,
+      south: 0,
+      north: 3,
+      crossesAntimeridian: false,
+    },
+  });
+  assert.deepEqual(
+    summary.geometryNodeTypes,
+    new Map([
+      ['GeometryCollection', 2],
+      ['Point', 1],
+      ['LineString', 1],
+    ]),
+  );
+});
+
+test('local geometry and Feature summaries do not expose document coordinate facts', () => {
+  const document: JsonValue = {
+    type: 'Feature',
+    properties: {},
+    geometry: point([1, 2, 3]),
+  };
+  const geometryEvents: GeometrySummary[] = [];
+  const geometryListener = {
+    geometry: (summary: GeometrySummary) => geometryEvents.push(summary),
+  };
+  const geometryFileSummary = scanGeoJSON(document, {
+    filePath: '<test>',
+    listener: geometryListener,
+    requirements: createExecutionRequirements({ listener: geometryListener }),
+  });
+  const featureEvents: unknown[] = [];
+  const featureListener = {
+    feature: (summary: unknown) => featureEvents.push(summary),
+  };
+  const featureFileSummary = scanGeoJSON(document, {
+    filePath: '<test>',
+    listener: featureListener,
+    requirements: createExecutionRequirements({ listener: featureListener }),
+  });
+
+  assert.equal(geometryEvents.length, 1);
+  assert.equal(geometryEvents[0]?.vertices, 1);
+  assert.equal(geometryEvents[0]?.coordinateDimensions, 3);
+  assert.equal(featureEvents.length, 1);
+  for (const summary of [geometryFileSummary, featureFileSummary]) {
+    assert.equal(summary.featureCount, 0);
+    assert.equal(summary.totalVertices, 0);
+    assert.equal(summary.derivedExtent, undefined);
+    assert.equal(summary.coordinateDimensionStats, undefined);
+    assert.equal(summary.completeness.facts.featureCount, 'not-computed');
+    assert.equal(summary.completeness.facts.vertexCount, 'not-computed');
+    assert.equal(
+      summary.completeness.facts.coordinateDimensionStats,
+      'not-computed',
+    );
+    assert.equal(summary.completeness.facts.derivedExtent, 'not-computed');
   }
 });
 
@@ -397,6 +506,10 @@ test('facts remain absent and not-computed unless requested', () => {
   assert.equal(vertices.totalVertices, 1);
   assert.equal(vertices.propertyStats, undefined);
   assert.equal(vertices.derivedExtent, undefined);
+  assert.equal(
+    vertices.completeness.facts.coordinateDimensionStats,
+    'not-computed',
+  );
 
   const properties = scan(document, ['propertyStats']);
   assert.equal(properties.completeness.facts.vertexCount, 'not-computed');
@@ -404,6 +517,10 @@ test('facts remain absent and not-computed unless requested', () => {
 
   const extent = scan(document, ['derivedExtent']);
   assert.equal(extent.completeness.facts.vertexCount, 'not-computed');
+  assert.equal(
+    extent.completeness.facts.coordinateDimensionStats,
+    'not-computed',
+  );
   assert.deepEqual(extent.derivedExtent, {
     west: 1,
     east: 1,
@@ -429,10 +546,18 @@ test('multiple coordinate facts share one traversal of each winning coordinate t
   const one: ScanInstrumentation = {
     coordinateTraversals: 0,
     positionVisits: 0,
+    coordinatePathMaterializations: 0,
   };
   const many: ScanInstrumentation = {
     coordinateTraversals: 0,
     positionVisits: 0,
+    coordinatePathMaterializations: 0,
+  };
+  const geometryEvents: GeometrySummary[] = [];
+  const coordinatePaths: string[] = [];
+  const listener = {
+    geometry: (summary: GeometrySummary) => geometryEvents.push(summary),
+    coordinate: ({ path }: CoordinateEvent) => coordinatePaths.push(path),
   };
   scanGeoJSON(document, {
     filePath: '<test>',
@@ -442,13 +567,55 @@ test('multiple coordinate facts share one traversal of each winning coordinate t
   scanGeoJSON(document, {
     filePath: '<test>',
     instrumentation: many,
+    listener,
     requirements: createExecutionRequirements({
       facts: ['vertexCount', 'coordinateDimensionStats', 'derivedExtent'],
-      listener: { coordinate() {} },
+      listener,
     }),
   });
-  assert.deepEqual(one, { coordinateTraversals: 1, positionVisits: 3 });
-  assert.deepEqual(many, one);
+  assert.deepEqual(one, {
+    coordinateTraversals: 1,
+    positionVisits: 3,
+    coordinatePathMaterializations: 0,
+  });
+  assert.deepEqual(many, {
+    coordinateTraversals: 1,
+    positionVisits: 3,
+    coordinatePathMaterializations: 3,
+  });
+  assert.equal(geometryEvents.length, 1);
+  assert.equal(geometryEvents[0]?.vertices, 3);
+  assert.deepEqual(coordinatePaths, [
+    '/coordinates/0/0/0',
+    '/coordinates/0/0/1',
+    '/coordinates/0/0/2',
+  ]);
+});
+
+test('large vertex-only traversal does not materialize position pointers', () => {
+  const coordinates = Array.from({ length: 10_000 }, (_, index) => [
+    index,
+    index,
+  ]);
+  const instrumentation: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+  };
+  const summary = scanGeoJSON(
+    { type: 'MultiPoint', coordinates },
+    {
+      filePath: '<test>',
+      instrumentation,
+      requirements: createExecutionRequirements({ facts: ['vertexCount'] }),
+    },
+  );
+  assert.equal(summary.totalVertices, 10_000);
+  assert.deepEqual(instrumentation, {
+    coordinateTraversals: 1,
+    positionVisits: 10_000,
+    coordinatePathMaterializations: 0,
+  });
 });
 
 test('property, geometry, id, null, dimension, and extent facts are reusable', () => {

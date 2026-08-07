@@ -20,6 +20,7 @@ export interface SemanticListener {
 }
 
 export interface ExecutionRequirements {
+  readonly geometrySummaries: boolean;
   readonly featureCount: boolean;
   readonly featureIds: boolean;
   readonly propertyNames: boolean;
@@ -48,15 +49,16 @@ export function createExecutionRequirements(
 ): ExecutionRequirements {
   const facts = new Set(options.facts);
   const listener = options.listener;
-  const wantsGeometrySummary = Boolean(listener?.geometry || listener?.feature);
+  const geometrySummaries = Boolean(listener?.geometry || listener?.feature);
   const propertyStats = facts.has('propertyStats');
   const geometryStats = facts.has('geometryStats');
   const idStats = facts.has('idStats');
-  const vertexCounts = facts.has('vertexCount') || wantsGeometrySummary;
-  const coordinateDimensions =
-    facts.has('coordinateDimensionStats') || wantsGeometrySummary;
+  const vertexCounts = facts.has('vertexCount');
+  const coordinateDimensions = facts.has('coordinateDimensionStats');
+  const geographicExtents = facts.has('derivedExtent');
 
   return Object.freeze({
+    geometrySummaries,
     featureCount:
       facts.has('featureCount') || propertyStats || geometryStats || idStats,
     featureIds: idStats || Boolean(listener?.feature),
@@ -69,12 +71,13 @@ export function createExecutionRequirements(
       Boolean(listener?.coordinate) ||
       vertexCounts ||
       coordinateDimensions ||
-      facts.has('derivedExtent'),
+      geographicExtents ||
+      geometrySummaries,
     vertexCounts,
-    ringCounts: wantsGeometrySummary,
-    geometryNodeCounts: geometryStats || wantsGeometrySummary,
+    ringCounts: geometrySummaries,
+    geometryNodeCounts: geometryStats || geometrySummaries,
     featureGeometryTypes: geometryStats,
-    geographicExtents: facts.has('derivedExtent') || wantsGeometrySummary,
+    geographicExtents,
     coordinateDimensions,
     propertyStats,
     idStats,

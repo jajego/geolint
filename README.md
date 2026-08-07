@@ -2,9 +2,10 @@
 
 Fast quality gates for production GeoJSON.
 
-GeoLint is in active development. The current foundation exposes `defineConfig`
-and resolved Phase 1 configuration/target handling; semantic linting begins in
-Phase 2.
+GeoLint is in active development. Configuration and target resolution are in
+place, along with the buffered semantic engine and the `lintGeoJSON()` and
+`lintGeoJSONText()` Node API foundations. Structural validation and built-in
+rules are coming next.
 
 ```sh
 npm install --save-dev geolint

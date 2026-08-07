@@ -19,7 +19,9 @@ function geometry(type: 'MultiPoint' | 'LineString', count: number): string {
 }
 
 function polygon(count: number): string {
-  return JSON.stringify({ type: 'Polygon', coordinates: [positions(count)] });
+  const ring = positions(count);
+  if (ring.length > 0) ring[ring.length - 1] = [...ring[0]!];
+  return JSON.stringify({ type: 'Polygon', coordinates: [ring] });
 }
 
 function features(count: number): string {

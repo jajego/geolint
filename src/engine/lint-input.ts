@@ -146,7 +146,8 @@ export async function lintGeoJSON(
   value: unknown,
   options: InMemoryLintOptions = {},
 ): Promise<FileLintResult> {
-  assertJsonValue(value);
   const startedAt = performance.now();
-  return scanResult(value, await filePath(options), startedAt);
+  const path = await filePath(options);
+  assertJsonValue(value);
+  return scanResult(value, path, startedAt);
 }

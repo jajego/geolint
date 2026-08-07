@@ -107,3 +107,14 @@ test('Phase 2 APIs never silently ignore configured policy', async () => {
       error.code === 'GEOLINT_UNIMPLEMENTED_POLICY',
   );
 });
+
+test('config incompatibility is found before a large object validation walk', async () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  await assert.rejects(
+    lintGeoJSON(cyclic, { config: { budgets: { future: 1 } } }),
+    (error) =>
+      error instanceof GeoLintConfigError &&
+      error.code === 'GEOLINT_UNIMPLEMENTED_POLICY',
+  );
+});
