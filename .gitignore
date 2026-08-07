@@ -39,6 +39,7 @@ build/Release
 
 # Dependency directories
 node_modules/
+dist/
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)
@@ -141,3 +142,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+#Docs
+geolint-system-design-v5.web_modules
+Implement GeoLint from the V5 System Design.md
