@@ -68,6 +68,7 @@ interface ScanState {
   readonly partialFacts: Set<SummaryFactName>;
   documentPartial: boolean;
   featureCount: number;
+  validPropertiesFeatureCount: number;
   totalVertices: number;
   largestFeatureVertices: number;
   propertiesNullCount: number;
@@ -89,6 +90,7 @@ export interface ScanInstrumentation {
   coordinateTraversals: number;
   positionVisits: number;
   coordinatePathMaterializations: number;
+  propertyPathMaterializations: number;
 }
 
 export interface ScanOptions {
@@ -123,17 +125,15 @@ function report(
   state: ScanState,
   code: string,
   message: string,
-  path: JsonPointer,
+  path: JsonPointer | (() => JsonPointer),
   featureIndex?: number,
 ): void {
   state.documentPartial = true;
-  state.diagnostics.report({
-    code,
-    source: 'geojson',
+  state.diagnostics.reportLazy({ code, source: 'geojson' }, () => ({
     message,
-    path,
+    path: typeof path === 'function' ? path() : path,
     ...(featureIndex === undefined ? {} : { featureIndex }),
-  });
+  }));
 }
 
 function ownMember(object: JsonObject, key: string): JsonValue | undefined {
@@ -150,13 +150,14 @@ function validateBbox(
   if (bbox === undefined) return;
   const valid =
     Array.isArray(bbox) &&
-    (bbox.length === 4 || bbox.length === 6) &&
+    bbox.length >= 4 &&
+    bbox.length % 2 === 0 &&
     bbox.every((value) => typeof value === 'number' && Number.isFinite(value));
   if (!valid) {
     report(
       state,
       'geojson/invalid-bbox',
-      'Expected bbox to contain four or six finite numbers.',
+      'Expected bbox to contain an even number of at least four finite numbers.',
       appendPointer(path, 'bbox'),
       featureIndex,
     );
@@ -287,6 +288,24 @@ function positionPath(
   return index === undefined ? parentPath : appendPointer(parentPath, index);
 }
 
+function invalidPosition(
+  parentPath: JsonPointer,
+  positionIndex: number | undefined,
+  featureIndex: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+): void {
+  metrics.complete = false;
+  damage(state, 'vertexCount', 'coordinateDimensionStats', 'derivedExtent');
+  report(
+    state,
+    'geojson/invalid-position',
+    'Expected a coordinate Position containing at least two finite numeric ordinates.',
+    () => positionPath(parentPath, positionIndex, state),
+    featureIndex,
+  );
+}
+
 function visitPosition(
   value: JsonValue,
   parentPath: JsonPointer,
@@ -296,15 +315,8 @@ function visitPosition(
   state: ScanState,
 ): void {
   if (!Array.isArray(value)) {
-    metrics.complete = false;
-    damage(state, 'vertexCount', 'coordinateDimensionStats', 'derivedExtent');
-    report(
-      state,
-      'geojson/invalid-position',
-      'Expected a coordinate Position containing at least two finite numeric ordinates.',
-      positionPath(parentPath, positionIndex, state),
-      featureIndex,
-    );
+    if (state.instrumentation) state.instrumentation.positionVisits += 1;
+    invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
     return;
   }
   const position = value;
@@ -320,15 +332,8 @@ function visitPosition(
     }
   }
   if (!valid) {
-    metrics.complete = false;
-    damage(state, 'vertexCount', 'coordinateDimensionStats', 'derivedExtent');
-    report(
-      state,
-      'geojson/invalid-position',
-      'Expected a coordinate Position containing at least two finite numeric ordinates.',
-      positionPath(parentPath, positionIndex, state),
-      featureIndex,
-    );
+    if (state.instrumentation) state.instrumentation.positionVisits += 1;
+    invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
     return;
   }
 
@@ -672,7 +677,6 @@ function scanProperties(
 
   for (const key of keys) {
     const propertyValue = properties[key] as JsonValue;
-    const propertyPath = appendPointer(path, key);
     const type = valueType(propertyValue);
     if (state.requirements.propertyStats) {
       let stats = state.propertyStats.get(key);
@@ -683,14 +687,25 @@ function scanProperties(
       stats.present += 1;
       increment(stats.types, type);
     }
-    state.listener?.property?.({ featureIndex, key, path: propertyPath, type });
-    state.listener?.propertyValue?.({
-      featureIndex,
-      key,
-      path: propertyPath,
-      type,
-      value: propertyValue,
-    });
+    if (state.listener?.property || state.listener?.propertyValue) {
+      if (state.instrumentation) {
+        state.instrumentation.propertyPathMaterializations += 1;
+      }
+      const propertyPath = appendPointer(path, key);
+      state.listener.property?.({
+        featureIndex,
+        key,
+        path: propertyPath,
+        type,
+      });
+      state.listener.propertyValue?.({
+        featureIndex,
+        key,
+        path: propertyPath,
+        type,
+        value: propertyValue,
+      });
+    }
   }
   return { isNull: false, count: keys.length };
 }
@@ -757,6 +772,9 @@ function scanFeature(
       propertiesPath,
       index,
     );
+  }
+  if (propertiesValid && state.requirements.propertyStats) {
+    state.validPropertiesFeatureCount += 1;
   }
   const needsProperties =
     state.requirements.propertyNames || Boolean(state.listener?.feature);
@@ -826,7 +844,8 @@ function completePropertyStats(
   for (const [key, stats] of state.propertyStats) {
     completed.set(key, {
       present: stats.present,
-      missing: state.featureCount - stats.present,
+      // Invalid properties are unknown, not observed missing.
+      missing: state.validPropertiesFeatureCount - stats.present,
       types: stats.types,
     });
   }
@@ -862,6 +881,7 @@ export function scanGeoJSON(
     partialFacts: new Set(),
     documentPartial: false,
     featureCount: 0,
+    validPropertiesFeatureCount: 0,
     totalVertices: 0,
     largestFeatureVertices: 0,
     propertiesNullCount: 0,

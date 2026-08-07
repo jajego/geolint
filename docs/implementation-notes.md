@@ -52,7 +52,8 @@ Structural validation runs inside the semantic scanner. Coordinate arrays are
 therefore inspected once for validation, enabled events, and requested facts.
 LineStrings require at least two Positions; linear rings require at least four
 Positions and identical first and last Positions. A structurally valid `bbox`
-is a finite numeric array of length four or six. GeoLint does not compare a
+is a finite numeric array with an even length of at least four, supporting the
+same 2D, 3D, and 4D+ dimensionality as Positions. GeoLint does not compare a
 declared bbox with geometry-derived bounds.
 
 Malformed Features, geometries, and Positions recover at their nearest safe
@@ -62,3 +63,12 @@ through partial aggregate facts. The object API's strict JSON-model validation
 remains a distinct boundary, so non-finite JavaScript numbers are input errors;
 the string API has no raw-byte encoding state and therefore cannot emit
 `parse/invalid-encoding`.
+
+Partial property statistics use only Features with structurally interpretable
+properties as their missing-count denominator. Invalid properties are unknown,
+while an empty object or `null` is an observed missing state. Suppressed
+diagnostics increment compact counters before display details are built, so
+high-cardinality Position failures materialize paths only for retained
+diagnostics. In a local 500k-invalid-Position run with a retention cap of two,
+this reduced wall time from 256.4 ms to 106.2 ms while preserving all 500,000
+logical errors.

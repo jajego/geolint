@@ -391,6 +391,56 @@ test('fact damage remains independent across malformed Feature fields', () => {
   assert.equal(invalidId.vertexCount, 'complete');
 });
 
+test('partial property statistics count only interpretable property states', () => {
+  const { summary } = inspect(
+    {
+      type: 'FeatureCollection',
+      features: [
+        { type: 'Feature', properties: { a: 1, b: 2 }, geometry: null },
+        { type: 'Feature', properties: [], geometry: null },
+        { type: 'Feature', properties: { b: 3 }, geometry: null },
+        { type: 'Feature', properties: null, geometry: null },
+      ],
+    },
+    ['propertyStats', 'vertexCount'],
+  );
+  assert.deepEqual(summary.propertyStats?.get('a'), {
+    present: 1,
+    missing: 2,
+    types: new Map([['number', 1]]),
+  });
+  assert.deepEqual(summary.propertyStats?.get('b'), {
+    present: 2,
+    missing: 1,
+    types: new Map([['number', 2]]),
+  });
+  assert.equal(summary.completeness.facts.propertyStats, 'partial');
+  assert.equal(summary.completeness.facts.vertexCount, 'complete');
+});
+
+test('empty and null properties are observed missing while invalid is unknown', () => {
+  for (const finalProperties of [{}, null] as const) {
+    const { summary } = inspect(
+      {
+        type: 'FeatureCollection',
+        features: [
+          { type: 'Feature', properties: { a: 1 }, geometry: null },
+          { type: 'Feature', properties: [], geometry: null },
+          {
+            type: 'Feature',
+            properties: finalProperties,
+            geometry: null,
+          },
+        ],
+      },
+      ['propertyStats'],
+    );
+    assert.equal(summary.propertyStats?.get('a')?.present, 1);
+    assert.equal(summary.propertyStats?.get('a')?.missing, 1);
+    assert.equal(summary.completeness.facts.propertyStats, 'partial');
+  }
+});
+
 test('malformed bbox affects document validity but not derived facts', () => {
   const cases: JsonValue[] = [
     { type: 'Point', coordinates: [1, 2], bbox: null },
@@ -409,6 +459,7 @@ test('malformed bbox affects document validity but not derived facts', () => {
   for (const bbox of [
     [0, 1, 2, 3],
     [0, 1, 2, 3, 4, 5],
+    [0, 1, 2, 3, 4, 5, 6, 7],
   ]) {
     assert.equal(
       inspect({ type: 'Point', coordinates: [1, 2], bbox }).diagnostics
@@ -416,6 +467,20 @@ test('malformed bbox affects document validity but not derived facts', () => {
       0,
     );
   }
+});
+
+test('a 4D geometry accepts an eight-value bbox', () => {
+  const { summary, diagnostics } = inspect({
+    type: 'Point',
+    coordinates: [1, 2, 3, 4],
+    bbox: [0, 0, 0, 0, 2, 3, 4, 5],
+  });
+  assert.equal(diagnostics.errorCount, 0);
+  assert.deepEqual(summary.coordinateDimensionStats, {
+    two: 0,
+    three: 0,
+    fourOrMore: 1,
+  });
 });
 
 test('requirements keep unrequested damaged facts not-computed', () => {
@@ -467,11 +532,42 @@ test('diagnostic caps retain bounded details without changing recovery', async (
   assert.equal(result.summary?.completeness.facts.vertexCount, 'partial');
 });
 
+test('diagnostic caps do not change observed facts or completeness', () => {
+  const document: JsonValue = {
+    type: 'MultiPoint',
+    coordinates: Array.from({ length: 20 }, (_, index) =>
+      index % 2 === 0 ? [index] : [index, index],
+    ),
+  };
+  const run = (limit?: number) => {
+    const diagnostics = new DiagnosticCollector(
+      '<structural>',
+      limit === undefined
+        ? {}
+        : { maxPerCodePerFile: limit, maxPerFile: limit },
+    );
+    const summary = scanGeoJSON(document, {
+      filePath: '<structural>',
+      diagnostics,
+      requirements: createExecutionRequirements({ facts: allFacts }),
+    });
+    return { summary, errors: diagnostics.errorCount };
+  };
+  const low = run(2);
+  const high = run(100);
+  const defaults = run();
+  assert.deepEqual(low, high);
+  assert.deepEqual(low, defaults);
+  assert.equal(low.summary.totalVertices, 10);
+  assert.equal(low.errors, 10);
+});
+
 test('diagnostic limits do not change traversal or lazy valid-position paths', () => {
   const instrumentation: ScanInstrumentation = {
     coordinateTraversals: 0,
     positionVisits: 0,
     coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
   };
   const diagnostics = new DiagnosticCollector('<structural>', {
     maxPerCodePerFile: 1,
@@ -492,8 +588,119 @@ test('diagnostic limits do not change traversal or lazy valid-position paths', (
   assert.equal(summary.totalVertices, 1);
   assert.equal(diagnostics.errorCount, 3);
   assert.equal(instrumentation.coordinateTraversals, 1);
-  assert.equal(instrumentation.positionVisits, 1);
-  assert.equal(instrumentation.coordinatePathMaterializations, 3);
+  assert.equal(instrumentation.positionVisits, 4);
+  assert.equal(instrumentation.coordinatePathMaterializations, 1);
+});
+
+test('suppressed Position diagnostics do not materialize paths', () => {
+  const instrumentation: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+  };
+  const diagnostics = new DiagnosticCollector('<structural>', {
+    maxPerCodePerFile: 2,
+    maxPerFile: 2,
+  });
+  const count = 100_000;
+  const summary = scanGeoJSON(
+    {
+      type: 'MultiPoint',
+      coordinates: Array.from({ length: count }, (_, index) => [index]),
+    },
+    {
+      filePath: '<structural>',
+      diagnostics,
+      instrumentation,
+      requirements: createExecutionRequirements({ facts: ['vertexCount'] }),
+    },
+  );
+  assert.equal(instrumentation.positionVisits, count);
+  assert.equal(instrumentation.coordinatePathMaterializations, 2);
+  assert.equal(diagnostics.errorCount, count);
+  assert.deepEqual(
+    diagnostics.diagnostics.map(({ path }) => path),
+    ['/coordinates/0', '/coordinates/1'],
+  );
+  assert.equal(diagnostics.suppressedDiagnostics[0]?.suppressedCount, 99_998);
+  assert.equal(summary.totalVertices, 0);
+  assert.equal(summary.completeness.facts.vertexCount, 'partial');
+});
+
+test('lazy diagnostics preserve per-code and per-file suppression order', () => {
+  const diagnostics = new DiagnosticCollector('<structural>', {
+    maxPerCodePerFile: 2,
+    maxPerFile: 3,
+  });
+  let detailsBuilt = 0;
+  const report = (code: string, occurrence: number) =>
+    diagnostics.reportLazy({ code, source: 'geojson' }, () => {
+      detailsBuilt += 1;
+      return { message: `${code}-${occurrence}` };
+    });
+  report('geojson/a', 0);
+  report('geojson/a', 1);
+  report('geojson/b', 0);
+  report('geojson/a', 2);
+  report('geojson/b', 1);
+  report('geojson/b', 2);
+  assert.equal(detailsBuilt, 3);
+  assert.deepEqual(
+    diagnostics.diagnostics.map(({ message }) => message),
+    ['geojson/a-0', 'geojson/a-1', 'geojson/b-0'],
+  );
+  assert.equal(diagnostics.errorCount, 6);
+  assert.deepEqual(diagnostics.suppressedDiagnostics, [
+    { code: 'geojson/a', severity: 'error', suppressedCount: 1 },
+    { code: 'geojson/b', severity: 'error', suppressedCount: 2 },
+  ]);
+});
+
+test('property paths are materialized only for public property hooks', () => {
+  const properties = Object.fromEntries(
+    Array.from({ length: 1_000 }, (_, index) => [
+      `key-${String(index).padStart(4, '0')}`,
+      index,
+    ]),
+  ) as JsonValue;
+  const document: JsonValue = {
+    type: 'Feature',
+    properties,
+    geometry: null,
+  };
+  const statsInstrumentation: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+  };
+  scanGeoJSON(document, {
+    filePath: '<structural>',
+    instrumentation: statsInstrumentation,
+    requirements: createExecutionRequirements({ facts: ['propertyStats'] }),
+  });
+  assert.equal(statsInstrumentation.propertyPathMaterializations, 0);
+
+  const paths: string[] = [];
+  const listener: SemanticListener = {
+    property: ({ path }) => paths.push(path),
+  };
+  const hookInstrumentation: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+  };
+  scanGeoJSON(document, {
+    filePath: '<structural>',
+    listener,
+    instrumentation: hookInstrumentation,
+    requirements: createExecutionRequirements({ listener }),
+  });
+  assert.equal(hookInstrumentation.propertyPathMaterializations, 1_000);
+  assert.equal(paths[0], '/properties/key-0000');
+  assert.equal(paths[999], '/properties/key-0999');
 });
 
 test('skipped-policy records distinguish incomplete facts from a pass', () => {

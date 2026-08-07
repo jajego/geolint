@@ -557,11 +557,13 @@ test('multiple coordinate facts share one traversal of each winning coordinate t
     coordinateTraversals: 0,
     positionVisits: 0,
     coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
   };
   const many: ScanInstrumentation = {
     coordinateTraversals: 0,
     positionVisits: 0,
     coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
   };
   const geometryEvents: GeometrySummary[] = [];
   const coordinatePaths: string[] = [];
@@ -587,11 +589,13 @@ test('multiple coordinate facts share one traversal of each winning coordinate t
     coordinateTraversals: 1,
     positionVisits: 4,
     coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
   });
   assert.deepEqual(many, {
     coordinateTraversals: 1,
     positionVisits: 4,
     coordinatePathMaterializations: 4,
+    propertyPathMaterializations: 0,
   });
   assert.equal(geometryEvents.length, 1);
   assert.equal(geometryEvents[0]?.vertices, 4);
@@ -612,6 +616,7 @@ test('large vertex-only traversal does not materialize position pointers', () =>
     coordinateTraversals: 0,
     positionVisits: 0,
     coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
   };
   const summary = scanGeoJSON(
     { type: 'MultiPoint', coordinates },
@@ -626,6 +631,7 @@ test('large vertex-only traversal does not materialize position pointers', () =>
     coordinateTraversals: 1,
     positionVisits: 10_000,
     coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
   });
 });
 

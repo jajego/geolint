@@ -1,10 +1,14 @@
 import { lintGeoJSONText } from '../engine/lint-input.js';
+import { DiagnosticCollector } from '../engine/diagnostics.js';
+import { createExecutionRequirements } from '../engine/requirements.js';
+import { scanGeoJSON, type ScanInstrumentation } from '../scanner/scan.js';
 
 interface Fixture {
   readonly name: string;
   readonly positions: number;
   readonly expectedVertices?: number;
   readonly expectedErrors?: number;
+  readonly diagnosticLimit?: number;
   readonly source: () => string;
 }
 
@@ -118,14 +122,15 @@ const fixtures: readonly Fixture[] = [
     source: () => sparseMalformedGeometries(10_000),
   },
   {
-    name: 'bad-positions-100k',
-    positions: 100_000,
+    name: 'bad-positions-500k',
+    positions: 500_000,
     expectedVertices: 0,
-    expectedErrors: 100_000,
+    expectedErrors: 500_000,
+    diagnosticLimit: 2,
     source: () =>
       JSON.stringify({
         type: 'MultiPoint',
-        coordinates: Array.from({ length: 100_000 }, (_, index) => [index]),
+        coordinates: Array.from({ length: 500_000 }, (_, index) => [index]),
       }),
   },
 ];
@@ -139,7 +144,16 @@ for (const fixture of fixtures) {
   const source = fixture.source();
   const bytes = Buffer.byteLength(source, 'utf8');
   const startedAt = performance.now();
-  const result = await lintGeoJSONText(source, { config: {} });
+  const result = await lintGeoJSONText(source, {
+    config: fixture.diagnosticLimit
+      ? {
+          diagnostics: {
+            maxPerCodePerFile: fixture.diagnosticLimit,
+            maxPerFile: fixture.diagnosticLimit,
+          },
+        }
+      : {},
+  });
   const elapsed = performance.now() - startedAt;
   const expectedVertices = fixture.expectedVertices ?? fixture.positions;
   const expectedErrors = fixture.expectedErrors ?? 0;
@@ -157,3 +171,35 @@ for (const fixture of fixtures) {
     `${fixture.name.padEnd(30)} ${elapsed.toFixed(1).padStart(7)} ${Math.round(positionsPerSecond).toLocaleString('en-US').padStart(13)} ${megabytesPerSecond.toFixed(1).padStart(10)} ${`${result.diagnostics.length}/${result.errorCount}`.padStart(12)}`,
   );
 }
+
+const malformedCount = 500_000;
+const instrumentation: ScanInstrumentation = {
+  coordinateTraversals: 0,
+  positionVisits: 0,
+  coordinatePathMaterializations: 0,
+  propertyPathMaterializations: 0,
+};
+const diagnostics = new DiagnosticCollector('<benchmark>', {
+  maxPerCodePerFile: 2,
+  maxPerFile: 2,
+});
+const malformedStartedAt = performance.now();
+scanGeoJSON(
+  {
+    type: 'MultiPoint',
+    coordinates: Array.from({ length: malformedCount }, (_, index) => [index]),
+  },
+  {
+    filePath: '<benchmark>',
+    diagnostics,
+    instrumentation,
+    requirements: createExecutionRequirements({ facts: ['vertexCount'] }),
+  },
+);
+const malformedElapsed = performance.now() - malformedStartedAt;
+console.log(
+  `suppressed-path-check ${malformedElapsed.toFixed(1)}ms ` +
+    `${Math.round(malformedCount / (malformedElapsed / 1_000)).toLocaleString('en-US')} positions/s ` +
+    `${diagnostics.diagnostics.length}/${diagnostics.errorCount} kept/errors ` +
+    `${instrumentation.coordinatePathMaterializations} paths`,
+);

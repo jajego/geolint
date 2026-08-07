@@ -33,6 +33,22 @@ test('lintGeoJSON accepts the strict JSON data model', async () => {
   assert.equal(result.summary?.bytes, undefined);
 });
 
+test('lintGeoJSON rejects a non-finite bbox before structural validation', async () => {
+  await assert.rejects(
+    lintGeoJSON(
+      {
+        type: 'Point',
+        coordinates: [1, 2],
+        bbox: [0, 0, Infinity, 2],
+      },
+      { config: {} },
+    ),
+    (error) =>
+      error instanceof GeoLintInputError &&
+      error.code === 'GEOLINT_INVALID_JSON_VALUE',
+  );
+});
+
 test('lintGeoJSON rejects JavaScript-only values with a stable error', async (context) => {
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;
