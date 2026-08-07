@@ -45,3 +45,20 @@ review: `NaN` and positive or negative infinity are rejected with
 Object-API validation currently remains a separate walk before semantic
 scanning. Fusing those walks is deferred until structural validation can do so
 without weakening the input boundary or destabilizing the scanner.
+
+## Phase 3: structural recovery decisions
+
+Structural validation runs inside the semantic scanner. Coordinate arrays are
+therefore inspected once for validation, enabled events, and requested facts.
+LineStrings require at least two Positions; linear rings require at least four
+Positions and identical first and last Positions. A structurally valid `bbox`
+is a finite numeric array of length four or six. GeoLint does not compare a
+declared bbox with geometry-derived bounds.
+
+Malformed Features, geometries, and Positions recover at their nearest safe
+array boundary. Completed Geometry and Feature summaries are withheld whenever
+their source subtree is incomplete, while safe observations remain available
+through partial aggregate facts. The object API's strict JSON-model validation
+remains a distinct boundary, so non-finite JavaScript numbers are input errors;
+the string API has no raw-byte encoding state and therefore cannot emit
+`parse/invalid-encoding`.

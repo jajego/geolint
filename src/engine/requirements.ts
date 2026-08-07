@@ -6,6 +6,7 @@ import type {
   GeometrySummary,
   PropertyEvent,
   PropertyValueEvent,
+  SkippedPolicy,
   SummaryFactName,
 } from '../types/semantic.js';
 
@@ -86,3 +87,27 @@ export function createExecutionRequirements(
 }
 
 export const noExecutionRequirements = createExecutionRequirements();
+
+export function skipPolicyForIncompleteFacts(options: {
+  readonly code: string;
+  readonly source: 'rule' | 'budget' | 'regression';
+  readonly requiredFacts: readonly SummaryFactName[];
+  readonly completeness: FileSummary['completeness'];
+  readonly configuredSeverity?: 'warning' | 'error';
+}): SkippedPolicy | undefined {
+  const incompleteFacts = options.requiredFacts.filter(
+    (fact) => options.completeness.facts[fact] !== 'complete',
+  );
+  return incompleteFacts.length === 0
+    ? undefined
+    : {
+        code: options.code,
+        source: options.source,
+        reason: 'incomplete-facts',
+        requiredFacts: options.requiredFacts,
+        incompleteFacts,
+        ...(options.configuredSeverity
+          ? { configuredSeverity: options.configuredSeverity }
+          : {}),
+      };
+}

@@ -99,7 +99,7 @@ test('valid JSON with an unsupported root remains an artifact diagnostic', async
   assert.equal(result.diagnostics[0]?.code, 'geojson/invalid-root');
 });
 
-test('Phase 2 APIs never silently ignore configured policy', async () => {
+test('buffered APIs never silently ignore configured policy', async () => {
   await assert.rejects(
     lintGeoJSON(valid, { config: { rules: { future: 'error' } } }),
     (error) =>

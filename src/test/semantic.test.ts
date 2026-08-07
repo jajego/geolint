@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { DiagnosticCollector } from '../engine/diagnostics.js';
 import { createExecutionRequirements } from '../engine/requirements.js';
 import { lintGeoJSONText } from '../engine/lint-input.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
@@ -234,10 +235,13 @@ test('all geometry families count vertices, rings, and nested nodes', () => {
             [0, 1],
             [2, 3],
           ],
-          [[4, 5]],
+          [
+            [4, 5],
+            [6, 7],
+          ],
         ],
       },
-      3,
+      4,
       0,
       1,
     ],
@@ -248,15 +252,18 @@ test('all geometry families count vertices, rings, and nested nodes', () => {
           [
             [0, 0],
             [1, 0],
+            [1, 1],
             [0, 0],
           ],
           [
             [2, 2],
+            [3, 2],
+            [3, 3],
             [2, 2],
           ],
         ],
       },
-      5,
+      8,
       2,
       1,
     ],
@@ -268,6 +275,7 @@ test('all geometry families count vertices, rings, and nested nodes', () => {
             [
               [0, 0],
               [1, 0],
+              [1, 1],
               [0, 0],
             ],
           ],
@@ -275,12 +283,13 @@ test('all geometry families count vertices, rings, and nested nodes', () => {
             [
               [2, 2],
               [3, 2],
+              [3, 3],
               [2, 2],
             ],
           ],
         ],
       },
-      6,
+      8,
       2,
       1,
     ],
@@ -538,6 +547,7 @@ test('multiple coordinate facts share one traversal of each winning coordinate t
         [
           [0, 0],
           [1, 0],
+          [1, 1],
           [0, 0],
         ],
       ],
@@ -575,20 +585,21 @@ test('multiple coordinate facts share one traversal of each winning coordinate t
   });
   assert.deepEqual(one, {
     coordinateTraversals: 1,
-    positionVisits: 3,
+    positionVisits: 4,
     coordinatePathMaterializations: 0,
   });
   assert.deepEqual(many, {
     coordinateTraversals: 1,
-    positionVisits: 3,
-    coordinatePathMaterializations: 3,
+    positionVisits: 4,
+    coordinatePathMaterializations: 4,
   });
   assert.equal(geometryEvents.length, 1);
-  assert.equal(geometryEvents[0]?.vertices, 3);
+  assert.equal(geometryEvents[0]?.vertices, 4);
   assert.deepEqual(coordinatePaths, [
     '/coordinates/0/0/0',
     '/coordinates/0/0/1',
     '/coordinates/0/0/2',
+    '/coordinates/0/0/3',
   ]);
 });
 
@@ -686,15 +697,20 @@ test('buffered semantic scanning observes only own root geometry members', () =>
     geometry: (summary: GeometrySummary) => geometries.push(summary),
   };
 
-  assert.throws(() =>
-    scanGeoJSON(value, {
-      filePath: '<test>',
+  const diagnostics = new DiagnosticCollector('<test>');
+  const summary = scanGeoJSON(value, {
+    filePath: '<test>',
+    listener,
+    diagnostics,
+    requirements: createExecutionRequirements({
+      facts: ['vertexCount'],
       listener,
-      requirements: createExecutionRequirements({
-        facts: ['vertexCount'],
-        listener,
-      }),
     }),
+  });
+  assert.equal(summary.completeness.document, 'partial');
+  assert.deepEqual(
+    diagnostics.diagnostics.map(({ code, path }) => [code, path]),
+    [['geojson/invalid-root', '/type']],
   );
   assert.deepEqual(coordinates, []);
   assert.deepEqual(geometries, []);
@@ -709,14 +725,16 @@ test('inherited FeatureCollection, Feature ID, properties, and geometry members 
   const collectionListener = {
     featureStart: ({ index }: { readonly index: number }) => starts.push(index),
   };
-  assert.throws(() =>
-    scanGeoJSON(collection, {
-      filePath: '<test>',
-      listener: collectionListener,
-      requirements: createExecutionRequirements({
-        listener: collectionListener,
-      }),
-    }),
+  const collectionDiagnostics = new DiagnosticCollector('<test>');
+  scanGeoJSON(collection, {
+    filePath: '<test>',
+    listener: collectionListener,
+    diagnostics: collectionDiagnostics,
+    requirements: createExecutionRequirements({ listener: collectionListener }),
+  });
+  assert.equal(
+    collectionDiagnostics.diagnostics[0]?.code,
+    'geojson/invalid-feature-collection',
   );
   assert.deepEqual(starts, []);
 
@@ -757,12 +775,16 @@ test('inherited FeatureCollection, Feature ID, properties, and geometry members 
   const propertyListener = {
     property: (event: PropertyEvent) => properties.push(event),
   };
-  assert.throws(() =>
-    scanGeoJSON(missingProperties, {
-      filePath: '<test>',
-      listener: propertyListener,
-      requirements: createExecutionRequirements({ listener: propertyListener }),
-    }),
+  const propertyDiagnostics = new DiagnosticCollector('<test>');
+  scanGeoJSON(missingProperties, {
+    filePath: '<test>',
+    listener: propertyListener,
+    diagnostics: propertyDiagnostics,
+    requirements: createExecutionRequirements({ listener: propertyListener }),
+  });
+  assert.equal(
+    propertyDiagnostics.diagnostics[0]?.code,
+    'geojson/invalid-properties',
   );
   assert.deepEqual(properties, []);
 
@@ -774,15 +796,19 @@ test('inherited FeatureCollection, Feature ID, properties, and geometry members 
   const geometryListener = {
     coordinate: (event: CoordinateEvent) => coordinates.push(event),
   };
-  assert.throws(() =>
-    scanGeoJSON(missingGeometry, {
-      filePath: '<test>',
+  const geometryDiagnostics = new DiagnosticCollector('<test>');
+  scanGeoJSON(missingGeometry, {
+    filePath: '<test>',
+    listener: geometryListener,
+    diagnostics: geometryDiagnostics,
+    requirements: createExecutionRequirements({
+      facts: ['vertexCount'],
       listener: geometryListener,
-      requirements: createExecutionRequirements({
-        facts: ['vertexCount'],
-        listener: geometryListener,
-      }),
     }),
+  });
+  assert.equal(
+    geometryDiagnostics.diagnostics[0]?.code,
+    'geojson/invalid-geometry',
   );
   assert.deepEqual(coordinates, []);
 });
@@ -797,12 +823,13 @@ test('inherited control getters are never invoked and own members still win', ()
   });
   const absent = JSON.parse('{}') as JsonValue;
   Object.setPrototypeOf(absent as object, inheritedGetter);
-  assert.throws(() =>
-    scanGeoJSON(absent, {
-      filePath: '<test>',
-      requirements: createExecutionRequirements(),
-    }),
-  );
+  const absentDiagnostics = new DiagnosticCollector('<test>');
+  scanGeoJSON(absent, {
+    filePath: '<test>',
+    diagnostics: absentDiagnostics,
+    requirements: createExecutionRequirements(),
+  });
+  assert.equal(absentDiagnostics.diagnostics[0]?.code, 'geojson/invalid-root');
   assert.equal(invoked, false);
 
   const pointValue = JSON.parse(
@@ -862,16 +889,17 @@ test('JSON.parse values ignore Object.prototype control members without invoking
     const listener = {
       coordinate: (event: CoordinateEvent) => events.push(event),
     };
-    assert.throws(() =>
-      scanGeoJSON(JSON.parse('{}') as JsonValue, {
-        filePath: '<test>',
+    const diagnostics = new DiagnosticCollector('<test>');
+    scanGeoJSON(JSON.parse('{}') as JsonValue, {
+      filePath: '<test>',
+      listener,
+      diagnostics,
+      requirements: createExecutionRequirements({
+        facts: ['vertexCount'],
         listener,
-        requirements: createExecutionRequirements({
-          facts: ['vertexCount'],
-          listener,
-        }),
       }),
-    );
+    });
+    assert.equal(diagnostics.diagnostics[0]?.code, 'geojson/invalid-root');
     assert.equal(invoked, false);
     assert.deepEqual(events, []);
   } finally {

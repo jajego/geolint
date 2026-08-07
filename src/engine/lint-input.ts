@@ -2,36 +2,35 @@ import { resolveFileConfig } from '../config/resolve.js';
 import { resolveRuntimeConfig } from '../config/runtime.js';
 import { assertJsonValue } from '../input/json-value.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
+import { DiagnosticCollector } from './diagnostics.js';
 import { createExecutionRequirements } from './requirements.js';
 import { scanGeoJSON } from '../scanner/scan.js';
 import type { GeoLintRuntimeContext, ResolvedConfig } from '../types/config.js';
-import type {
-  Diagnostic,
-  FileLintResult,
-  JsonValue,
-} from '../types/semantic.js';
-import {
-  GeoLintConfigError,
-  GeoLintInputError,
-  GeoLintInternalError,
-} from './errors.js';
+import type { FileLintResult, JsonValue } from '../types/semantic.js';
+import { GeoLintConfigError, GeoLintInputError } from './errors.js';
 
 export interface InMemoryLintOptions extends GeoLintRuntimeContext {
   readonly filename?: string;
 }
 
-async function filePath(options: InMemoryLintOptions): Promise<string> {
+async function inputContext(options: InMemoryLintOptions): Promise<{
+  readonly filePath: string;
+  readonly diagnostics: ResolvedConfig['diagnostics'];
+}> {
   const config = await resolveRuntimeConfig(options);
   if (options.filename) {
     const fileConfig = resolveFileConfig(config, options.filename);
-    assertPhase2PolicyFree(fileConfig);
-    return fileConfig.filePath;
+    assertPolicyFree(fileConfig);
+    return {
+      filePath: fileConfig.filePath,
+      diagnostics: fileConfig.diagnostics,
+    };
   }
-  assertPhase2PolicyFree(config);
-  return '<memory>';
+  assertPolicyFree(config);
+  return { filePath: '<memory>', diagnostics: config.diagnostics };
 }
 
-function assertPhase2PolicyFree(config: ResolvedConfig): void {
+function assertPolicyFree(config: ResolvedConfig): void {
   const activeRule = Object.entries(config.rules).find(
     ([, setting]) => setting !== 'off',
   );
@@ -42,72 +41,45 @@ function assertPhase2PolicyFree(config: ResolvedConfig): void {
     Object.keys(config.plugins).length > 0
   ) {
     throw new GeoLintConfigError(
-      'Phase 2 buffered APIs do not execute configured policies yet.',
+      'Buffered APIs do not execute configured policies yet.',
       'GEOLINT_UNIMPLEMENTED_POLICY',
     );
   }
 }
 
-function failedResult(
-  path: string,
-  diagnostic: Diagnostic,
+function fileResult(
+  collector: DiagnosticCollector,
   startedAt: number,
+  summary?: FileLintResult['summary'],
 ): FileLintResult {
   return {
-    filePath: path,
-    diagnostics: [diagnostic],
-    suppressedDiagnostics: [],
+    filePath: collector.filePath,
+    diagnostics: collector.diagnostics,
+    suppressedDiagnostics: collector.suppressedDiagnostics,
     skippedPolicies: [],
-    errorCount: 1,
-    warningCount: 0,
+    ...(summary ? { summary } : {}),
+    errorCount: collector.errorCount,
+    warningCount: collector.warningCount,
     durationMs: performance.now() - startedAt,
   };
 }
 
 function scanResult(
   value: JsonValue,
-  path: string,
+  collector: DiagnosticCollector,
   startedAt: number,
   sourceBytes?: number,
 ): FileLintResult {
-  try {
-    const summary = scanGeoJSON(value, {
-      filePath: path,
-      requirements: createExecutionRequirements({
-        facts: ['featureCount', 'vertexCount'],
-        exactFileBytes: sourceBytes !== undefined,
-      }),
-      ...(sourceBytes === undefined ? {} : { sourceBytes }),
-    });
-    return {
-      filePath: path,
-      diagnostics: [],
-      suppressedDiagnostics: [],
-      skippedPolicies: [],
-      summary,
-      errorCount: 0,
-      warningCount: 0,
-      durationMs: performance.now() - startedAt,
-    };
-  } catch (error) {
-    if (
-      error instanceof GeoLintInternalError &&
-      error.code === 'GEOLINT_INVALID_SEMANTIC_INPUT'
-    ) {
-      return failedResult(
-        path,
-        {
-          code: error.message.startsWith('Expected a supported GeoJSON root')
-            ? 'geojson/invalid-root'
-            : 'geojson/invalid-structure',
-          severity: 'error',
-          message: error.message,
-        },
-        startedAt,
-      );
-    }
-    throw error;
-  }
+  const summary = scanGeoJSON(value, {
+    filePath: collector.filePath,
+    diagnostics: collector,
+    requirements: createExecutionRequirements({
+      facts: ['featureCount', 'vertexCount'],
+      exactFileBytes: sourceBytes !== undefined,
+    }),
+    ...(sourceBytes === undefined ? {} : { sourceBytes }),
+  });
+  return fileResult(collector, startedAt, summary);
 }
 
 export async function lintGeoJSONText(
@@ -121,22 +93,23 @@ export async function lintGeoJSONText(
     );
   }
   const startedAt = performance.now();
-  const path = await filePath(options);
+  const context = await inputContext(options);
+  const collector = new DiagnosticCollector(
+    context.filePath,
+    context.diagnostics,
+  );
   const parsed = parseBufferedJSON(text);
   if (!parsed.ok) {
-    return failedResult(
-      path,
-      {
-        code: 'parse/invalid-json',
-        severity: 'error',
-        message: 'Input is not valid JSON.',
-      },
-      startedAt,
-    );
+    collector.report({
+      code: 'parse/invalid-json',
+      source: 'parser',
+      message: 'Input is not valid JSON.',
+    });
+    return fileResult(collector, startedAt);
   }
   return scanResult(
     parsed.value,
-    path,
+    collector,
     startedAt,
     Buffer.byteLength(text, 'utf8'),
   );
@@ -147,7 +120,11 @@ export async function lintGeoJSON(
   options: InMemoryLintOptions = {},
 ): Promise<FileLintResult> {
   const startedAt = performance.now();
-  const path = await filePath(options);
+  const context = await inputContext(options);
   assertJsonValue(value);
-  return scanResult(value, path, startedAt);
+  return scanResult(
+    value,
+    new DiagnosticCollector(context.filePath, context.diagnostics),
+    startedAt,
+  );
 }

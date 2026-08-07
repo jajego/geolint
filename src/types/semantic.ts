@@ -146,8 +146,10 @@ export interface FileSummary {
 
 export interface Diagnostic {
   readonly code: string;
+  readonly source: 'parser' | 'geojson' | 'rule' | 'budget' | 'regression';
   readonly severity: 'warning' | 'error';
   readonly message: string;
+  readonly filePath: string;
   readonly path?: JsonPointer;
   readonly featureIndex?: number;
   readonly featureId?: string | number;
@@ -158,7 +160,7 @@ export interface Diagnostic {
 export interface SuppressionSummary {
   readonly code: string;
   readonly severity: 'warning' | 'error';
-  readonly count: number;
+  readonly suppressedCount: number;
 }
 
 export type SkippedPolicy =
