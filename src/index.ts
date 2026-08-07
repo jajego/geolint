@@ -1,10 +1,50 @@
 import type { GeoLintConfig } from './types/config.js';
 
+export { lintGeoJSON, lintGeoJSONText } from './engine/lint-input.js';
+export {
+  GeoLintBatchError,
+  GeoLintCapabilityError,
+  GeoLintConfigError,
+  GeoLintError,
+  GeoLintInputError,
+  GeoLintInternalError,
+  GeoLintIOError,
+  GeoLintPluginError,
+  GeoLintTargetError,
+} from './engine/errors.js';
+export { jsonPointer } from './scanner/json-pointer.js';
+
 export type {
   DiagnosticLimitConfig,
   GeoLintConfig,
   GeoLintOverride,
 } from './types/config.js';
+export type {
+  CoordinateDimensions,
+  CoordinateEvent,
+  CoordinateLexemeEvent,
+  Diagnostic,
+  FactStatus,
+  FeatureStartEvent,
+  FeatureSummary,
+  FileCompleteness,
+  FileLintResult,
+  FileSummary,
+  GeographicExtent,
+  GeoJSONGeometryType,
+  GeometrySummary,
+  JsonObject,
+  JsonPointer,
+  JsonPrimitive,
+  JsonValue,
+  JsonValueType,
+  PropertyEvent,
+  PropertyStats,
+  PropertyValueEvent,
+  SkippedPolicy,
+  SummaryFactName,
+  SuppressionSummary,
+} from './types/semantic.js';
 
 /** Defines a GeoLint configuration without changing its inferred type. */
 export function defineConfig<const T extends GeoLintConfig>(config: T): T {

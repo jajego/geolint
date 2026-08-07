@@ -27,3 +27,17 @@ GeoLint validates its V1 glob subset before delegating to Picomatch or Fast
 Glob. Glob matching uses a discovered logical path; `realpath` is reserved for
 later alias deduplication, so a file symlink remains eligible through the
 configured path that selected it.
+
+## Phase 2: buffered semantic decisions
+
+V5 references `PropertyStats` without defining its shape. Phase 2 uses the
+smallest data needed by the specified presence/type policies: `present`,
+`missing`, and a coarse-type count map.
+
+V5's `GeometrySummary.coordinateDimensions` union has no empty-geometry value.
+An empty geometry therefore reports `"mixed"`, meaning no single observed
+dimension category; document-level dimension counts remain all zero.
+
+The object API follows the strict JSON-data-model boundary selected in the V5
+review: `NaN` and positive or negative infinity are rejected with
+`GEOLINT_INVALID_JSON_VALUE`, rather than entering structural traversal.

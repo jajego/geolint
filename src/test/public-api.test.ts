@@ -10,7 +10,21 @@ test('defineConfig preserves configuration values', () => {
 });
 
 test('root module exports only implemented consumer APIs', () => {
-  assert.deepEqual(Object.keys(geolint), ['defineConfig']);
+  assert.deepEqual(Object.keys(geolint), [
+    'GeoLintBatchError',
+    'GeoLintCapabilityError',
+    'GeoLintConfigError',
+    'GeoLintError',
+    'GeoLintIOError',
+    'GeoLintInputError',
+    'GeoLintInternalError',
+    'GeoLintPluginError',
+    'GeoLintTargetError',
+    'defineConfig',
+    'jsonPointer',
+    'lintGeoJSON',
+    'lintGeoJSONText',
+  ]);
 });
 
 test('public config types reject override baseline changes', () => {
@@ -23,4 +37,17 @@ test('public config types reject override baseline changes', () => {
       },
     ],
   });
+});
+
+test('semantic event types expose only their promised capability', () => {
+  const property = (event: geolint.PropertyEvent) => {
+    // @ts-expect-error property() does not provide the value
+    void event.value;
+  };
+  const coordinate = (event: geolint.CoordinateEvent) => {
+    // @ts-expect-error coordinate() does not provide numeric lexemes
+    void event.rawValues;
+  };
+  void property;
+  void coordinate;
 });
