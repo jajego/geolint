@@ -1,7 +1,7 @@
 import { dirname, resolve } from 'node:path';
 
 import { discoverConfig } from './discover.js';
-import { loadConfigWithExtends } from './load.js';
+import { loadConfigWithExtends, resolveConfigExtends } from './load.js';
 import { getPreset } from './presets.js';
 import { resolveConfig } from './resolve.js';
 import type {
@@ -27,9 +27,9 @@ export async function resolveRuntimeConfig(
         : await discoverConfig(cwd);
   const config: GeoLintConfig =
     typeof supplied === 'object'
-      ? supplied
+      ? await resolveConfigExtends(supplied, cwd)
       : path
         ? await loadConfigWithExtends(path)
-        : getPreset('geolint/recommended')!;
+        : await resolveConfigExtends(getPreset('geolint/recommended')!, cwd);
   return resolveConfig(config, path ? dirname(path) : cwd);
 }

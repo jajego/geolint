@@ -92,6 +92,10 @@ export function mergeOverride(
   base: GeoLintConfig,
   override: GeoLintOverride,
 ): GeoLintConfig {
-  const { baseline: _baseline, ...regression } = override.regression ?? {};
-  return mergeConfig(base, { ...override, regression });
+  return mergeConfig(base, {
+    ...(override.rules ? { rules: override.rules } : {}),
+    ...(override.budgets ? { budgets: override.budgets } : {}),
+    ...(override.regression ? { regression: override.regression } : {}),
+    ...(override.diagnostics ? { diagnostics: override.diagnostics } : {}),
+  });
 }

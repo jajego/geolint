@@ -29,16 +29,19 @@
     "test": "npm run build && node --test dist/test/*.test.js",
     "test:integration": "npm run test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "npm run typecheck",
-    "format": "prettier --write src package.json tsconfig.json README.md docs/implementation-notes.md .prettierrc.json",
-    "format:check": "prettier --check src package.json tsconfig.json README.md docs/implementation-notes.md .prettierrc.json",
+    "lint": "eslint src",
+    "format": "prettier --write src package.json tsconfig.json eslint.config.js README.md docs/implementation-notes.md .prettierrc.json",
+    "format:check": "prettier --check src package.json tsconfig.json eslint.config.js README.md docs/implementation-notes.md .prettierrc.json",
     "benchmark": "npm run build && node dist/benchmark/index.js"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.0.0",
     "@types/picomatch": "^4.0.3",
+    "eslint": "^10.8.0",
     "prettier": "^3.5.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.66.0"
   },
   "dependencies": {
     "fast-glob": "^3.3.3",

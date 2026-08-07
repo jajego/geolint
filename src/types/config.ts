@@ -4,6 +4,9 @@ export type RuleSetting =
 export type RuleConfigMap = Readonly<Record<string, RuleSetting>>;
 export type BudgetConfig = Readonly<Record<string, unknown>>;
 export type RegressionConfig = Readonly<Record<string, unknown>>;
+export type RegressionPolicyOverride = RegressionConfig & {
+  readonly baseline?: never;
+};
 
 export interface DiagnosticLimitConfig {
   maxPerCodePerFile?: number;
@@ -15,7 +18,7 @@ export interface GeoLintOverride {
   ignores?: readonly string[];
   rules?: RuleConfigMap;
   budgets?: BudgetConfig;
-  regression?: RegressionConfig;
+  regression?: RegressionPolicyOverride;
   diagnostics?: DiagnosticLimitConfig;
 }
 
