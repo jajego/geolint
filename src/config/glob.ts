@@ -16,6 +16,8 @@ export function assertGlob(pattern: string): void {
 }
 
 function validateSegment(segment: string, pattern: string): void {
+  // Picomatch treats these as regex operators; GeoLint V1 does not expose them.
+  if (/[()|+^$]/.test(segment)) invalidGlob(pattern);
   if (segment.includes('**') && segment !== '**') invalidGlob(pattern);
 
   for (let index = 0; index < segment.length; index += 1) {
