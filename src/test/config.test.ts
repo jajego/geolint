@@ -214,17 +214,27 @@ test('file config extends merge left-to-right before local values', async () => 
   }
 });
 
-test('TypeScript config files load without a user build step', async () => {
+test('every supported config extension loads through the real loader', async () => {
   const root = await temporaryProject();
+  const sources: Readonly<Record<string, string>> = {
+    ts: 'export default { rules: { ts: "error" } } as const;',
+    mts: 'export default { rules: { mts: "error" } } as const;',
+    cts: 'export default { rules: { cts: "error" } } as const;',
+    js: 'export default { rules: { js: "error" } };',
+    mjs: 'export default { rules: { mjs: "error" } };',
+    cjs: 'module.exports = { rules: { cjs: "error" } };',
+    json: JSON.stringify({ rules: { json: 'error' } }),
+  };
   try {
-    await writeFile(
-      join(root, 'geolint.config.ts'),
-      'export default { rules: { typescript: "error" } } as const;',
-    );
+    for (const [extension, source] of Object.entries(sources)) {
+      const directory = join(root, extension);
+      await mkdir(directory);
+      await writeFile(join(directory, `geolint.config.${extension}`), source);
 
-    const config = await resolveRuntimeConfig({ cwd: root });
+      const config = await resolveRuntimeConfig({ cwd: directory });
 
-    assert.equal(config.rules.typescript, 'error');
+      assert.equal(config.rules[extension], 'error');
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

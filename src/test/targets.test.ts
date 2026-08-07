@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { resolveTargets } from '../cli/targets.js';
+import { matchesGlob } from '../config/glob.js';
 import { resolveConfig } from '../config/resolve.js';
 import { GeoLintTargetError } from '../engine/errors.js';
 
@@ -213,6 +214,70 @@ test('an explicitly dot-prefixed configured pattern includes dot segments', asyn
     assert.deepEqual(
       targets.map(({ filePath }) => filePath),
       ['.fixtures/map.geojson'],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('filesystem expansion agrees with GeoLint matching for supported globs', async () => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'public', 'nested'), { recursive: true });
+    await writeFile(join(root, 'public', 'a.geojson'), '{}');
+    await writeFile(join(root, 'public', 'b.geojson'), '{}');
+    await writeFile(join(root, 'public', 'nested', 'a.geojson'), '{}');
+    const candidates = [
+      'public/a.geojson',
+      'public/b.geojson',
+      'public/nested/a.geojson',
+    ];
+
+    for (const pattern of ['public/[ab].geojson', 'public/**/a.geojson']) {
+      const targets = await resolveTargets(
+        resolveConfig({ files: [pattern] }, root),
+        undefined,
+        root,
+      );
+      assert.deepEqual(
+        targets.map(({ filePath }) => filePath),
+        candidates.filter((candidate) => matchesGlob(candidate, [pattern])),
+      );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('logical symlink paths remain eligible after physical identity lookup', async (t) => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'public'));
+    await mkdir(join(root, 'generated'));
+    await writeFile(join(root, 'generated', 'map.geojson'), '{}');
+    try {
+      await symlink(
+        join(root, 'generated', 'map.geojson'),
+        join(root, 'public', 'current.geojson'),
+        'file',
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+        t.skip('Creating file symlinks is not permitted on this host.');
+        return;
+      }
+      throw error;
+    }
+
+    const targets = await resolveTargets(
+      resolveConfig({ files: ['public/*.geojson'] }, root),
+      undefined,
+      root,
+    );
+
+    assert.deepEqual(
+      targets.map(({ filePath }) => filePath),
+      ['public/current.geojson'],
     );
   } finally {
     await rm(root, { recursive: true, force: true });

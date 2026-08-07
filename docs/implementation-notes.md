@@ -20,3 +20,10 @@ from the config-defined project root. Raw config validation and `extends`
 expansion happen before immutable per-file policy resolution. Stdin remains a
 first-class target, with path overrides applied only when a logical filename is
 provided.
+
+## Phase 1 final hardening: glob and alias contracts
+
+GeoLint validates its V1 glob subset before delegating to Picomatch or Fast
+Glob. Glob matching uses a discovered logical path; `realpath` is reserved for
+later alias deduplication, so a file symlink remains eligible through the
+configured path that selected it.

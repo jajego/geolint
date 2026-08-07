@@ -22,11 +22,9 @@ export async function loadConfig(path: string): Promise<GeoLintConfig> {
             interopDefault: true,
           }).import(absolutePath);
     const loaded =
-      isConfig(imported) &&
-      Object.keys(imported).length === 1 &&
-      'default' in imported
-        ? imported.default
-        : imported;
+      extname(absolutePath) === '.json'
+        ? imported
+        : (defaultConfig(imported) ?? imported);
     if (!isConfig(loaded))
       throw new Error('The default export must be an object.');
     validateConfig(loaded);
@@ -43,6 +41,14 @@ export async function loadConfig(path: string): Promise<GeoLintConfig> {
       code,
     );
   }
+}
+
+function defaultConfig(value: unknown): GeoLintConfig | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const module = value as Record<string, unknown>;
+  return isConfig(module.default) ? module.default : undefined;
 }
 
 function isRecordWithCode(error: unknown): error is { code: unknown } {

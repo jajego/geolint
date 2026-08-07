@@ -1,8 +1,8 @@
-import { lstat, realpath, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
 import fg from 'fast-glob';
 
-import { assertGlob, matchesGlob } from '../config/glob.js';
+import { assertGlob, matchesGlob, normalizePath } from '../config/glob.js';
 import { normalizeFilePath, resolveFileConfig } from '../config/resolve.js';
 import { GeoLintTargetError } from '../engine/errors.js';
 import type { ResolvedConfig, ResolvedFileConfig } from '../types/config.js';
@@ -41,20 +41,56 @@ async function explicitPathKind(
 
 async function expand(pattern: string, cwd: string): Promise<string[]> {
   assertGlob(pattern);
-  const paths = await fg(pattern, {
+  const normalizedPattern = normalizePath(pattern);
+  const paths = await fg(normalizedPattern, {
     cwd,
     absolute: true,
-    onlyFiles: true,
+    onlyFiles: false,
     caseSensitiveMatch: true,
+    braceExpansion: true,
     dot: false,
+    extglob: false,
     followSymbolicLinks: false,
+    globstar: true,
   });
-  const canonicalPaths = await Promise.all(
-    paths.map((path) => realpath(path).catch(() => path)),
+  const files = (
+    await Promise.all(
+      paths.map(async (path) =>
+        (await explicitPathKind(path)) === 'file' ? path : undefined,
+      ),
+    )
+  ).filter((path): path is string => path !== undefined);
+  const logicalPaths = await Promise.all(
+    files.map((path) => canonicalLogicalPath(path, cwd)),
   );
-  return paths.filter((_, index) =>
-    matchesGlob(normalizeFilePath(cwd, canonicalPaths[index]!), [pattern]),
+  return logicalPaths.filter((path) =>
+    matchesGlob(normalizeFilePath(cwd, path), [normalizedPattern]),
   );
+}
+
+/** Restores filesystem casing without resolving symlink targets. */
+async function canonicalLogicalPath(
+  path: string,
+  cwd: string,
+): Promise<string> {
+  const segments = normalizePath(relative(cwd, path)).split('/');
+  let current = resolve(cwd);
+  for (const segment of segments) {
+    if (segment === '' || segment === '.') continue;
+    try {
+      const entries = await readdir(current, { withFileTypes: true });
+      const entry =
+        entries.find((candidate) => candidate.name === segment) ??
+        entries.find(
+          (candidate) => candidate.name.toLowerCase() === segment.toLowerCase(),
+        );
+      if (!entry) return path;
+      current = join(current, entry.name);
+    } catch {
+      return path;
+    }
+  }
+  return current;
 }
 
 async function collectExplicit(
