@@ -2,6 +2,7 @@ import { lintGeoJSONText } from '../engine/lint-input.js';
 import { DiagnosticCollector } from '../engine/diagnostics.js';
 import { createExecutionRequirements } from '../engine/requirements.js';
 import { scanGeoJSON, type ScanInstrumentation } from '../scanner/scan.js';
+import type { GeoLintConfig } from '../types/config.js';
 
 interface Fixture {
   readonly name: string;
@@ -43,6 +44,30 @@ function features(count: number): string {
     };
   }
   return JSON.stringify({ type: 'FeatureCollection', features: values });
+}
+
+function featuresWithIds(count: number, duplicate = false): string {
+  const value = JSON.parse(features(count)) as {
+    features: Record<string, unknown>[];
+  };
+  value.features.forEach((feature, index) => {
+    feature.id = duplicate ? 'same' : index;
+  });
+  return JSON.stringify({
+    type: 'FeatureCollection',
+    features: value.features,
+  });
+}
+
+function wideProperties(count: number): string {
+  const properties = Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [`p${index}`, index]),
+  );
+  return JSON.stringify({
+    type: 'Feature',
+    properties,
+    geometry: { type: 'Point', coordinates: [0, 0] },
+  });
 }
 
 function sparseMalformedFeatures(count: number): string {
@@ -137,8 +162,123 @@ const fixtures: readonly Fixture[] = [
 
 await lintGeoJSONText(geometry('MultiPoint', 1_000), { config: {} });
 
+const policyFixtures = [
+  ['points-100k', 100_000, () => geometry('MultiPoint', 100_000)],
+  ['points-1m', 1_000_000, () => geometry('MultiPoint', 1_000_000)],
+  ['line-heavy-100k', 100_000, () => geometry('LineString', 100_000)],
+  ['polygon-heavy-100k', 100_000, () => polygon(100_000)],
+  ['small-features-10k', 10_000, () => features(10_000)],
+  ['wide-properties-10k', 1, () => wideProperties(10_000)],
+  ['unique-ids-10k', 10_000, () => featuresWithIds(10_000)],
+] as const;
 console.log(
-  'fixture                         ms   positions/s       MB/s  kept/errors',
+  '\nstructural vs recommended        structural  recommended  overhead',
+);
+for (const [name, count, sourceFactory] of policyFixtures) {
+  const source = sourceFactory();
+  const startedStructural = performance.now();
+  const structural = await lintGeoJSONText(source, { config: {} });
+  const structuralMs = performance.now() - startedStructural;
+  const startedRecommended = performance.now();
+  const recommended = await lintGeoJSONText(source);
+  const recommendedMs = performance.now() - startedRecommended;
+  if (
+    structural.errorCount !== 0 ||
+    recommended.errorCount !== 0 ||
+    recommended.summary?.totalVertices !== count
+  ) {
+    throw new Error(`Policy benchmark fixture ${name} was not clean.`);
+  }
+  console.log(
+    `${name.padEnd(30)} ${structuralMs.toFixed(1).padStart(10)} ${recommendedMs.toFixed(1).padStart(12)} ${`${((recommendedMs / structuralMs - 1) * 100).toFixed(1)}%`.padStart(9)}`,
+  );
+}
+
+async function failingPolicy(
+  name: string,
+  source: string,
+  config: GeoLintConfig,
+  expectedErrors: number,
+): Promise<void> {
+  const startedAt = performance.now();
+  const result = await lintGeoJSONText(source, {
+    config: {
+      ...config,
+      diagnostics: { maxPerCodePerFile: 2, maxPerFile: 2 },
+    },
+  });
+  const elapsed = performance.now() - startedAt;
+  if (result.errorCount !== expectedErrors || result.diagnostics.length !== 2) {
+    throw new Error(`Failure benchmark ${name} produced unexpected results.`);
+  }
+  console.log(
+    `${name.padEnd(30)} ${elapsed.toFixed(1).padStart(8)}ms ${`${result.diagnostics.length}/${result.errorCount}`.padStart(14)} kept/errors`,
+  );
+}
+
+console.log('\nhigh-cardinality policy failures');
+await failingPolicy(
+  'range-failures-100k',
+  JSON.stringify({
+    type: 'MultiPoint',
+    coordinates: Array.from({ length: 100_000 }, () => [181, 91]),
+  }),
+  { rules: { 'valid-coordinate-range': 'error' } },
+  100_000,
+);
+await failingPolicy(
+  'missing-ids-10k',
+  features(10_000),
+  { rules: { 'require-feature-id': 'error' } },
+  10_000,
+);
+await failingPolicy(
+  'duplicate-ids-10k',
+  featuresWithIds(10_000, true),
+  { rules: { 'unique-feature-id': 'error' } },
+  9_999,
+);
+const inconsistentProperties = Object.fromEntries(
+  Array.from({ length: 5_000 }, (_, index) => [`p${index}`, 'x']),
+);
+await failingPolicy(
+  'property-types-5k',
+  JSON.stringify({
+    type: 'FeatureCollection',
+    features: [
+      JSON.parse(wideProperties(5_000)),
+      {
+        type: 'Feature',
+        properties: inconsistentProperties,
+        geometry: null,
+      },
+    ],
+  }),
+  { rules: { 'consistent-property-types': 'error' } },
+  5_000,
+);
+await failingPolicy(
+  'feature-budget-10k',
+  JSON.stringify({
+    type: 'FeatureCollection',
+    features: Array.from({ length: 10_000 }, (_, id) => ({
+      type: 'Feature',
+      id,
+      properties: {},
+      geometry: {
+        type: 'MultiPoint',
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      },
+    })),
+  }),
+  { budgets: { feature: { vertices: 1 } } },
+  10_000,
+);
+console.log(
+  '\nstructural/malformed fixtures    ms   positions/s       MB/s  kept/errors',
 );
 for (const fixture of fixtures) {
   const source = fixture.source();

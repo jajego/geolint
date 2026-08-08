@@ -64,6 +64,8 @@ interface ScanState {
   readonly requirements: ExecutionRequirements;
   readonly listener?: SemanticListener;
   readonly instrumentation?: ScanInstrumentation;
+  readonly coordinateObservation?: CoordinateObservation;
+  readonly featureIdObservation?: FeatureIdObservation;
   readonly diagnostics: DiagnosticCollector;
   readonly partialFacts: Set<SummaryFactName>;
   documentPartial: boolean;
@@ -99,8 +101,24 @@ export interface ScanOptions {
   readonly listener?: SemanticListener;
   readonly sourceBytes?: number;
   readonly instrumentation?: ScanInstrumentation;
+  readonly coordinateObservation?: CoordinateObservation;
+  readonly featureIdObservation?: FeatureIdObservation;
   readonly diagnostics?: DiagnosticCollector;
 }
+
+export type CoordinateObservation = (
+  values: readonly number[],
+  featureIndex: number | undefined,
+  parentPath: JsonPointer,
+  positionIndex: number | undefined,
+) => void;
+
+export type FeatureIdObservation = (
+  index: number,
+  path: JsonPointer,
+  status: 'missing' | 'valid' | 'invalid',
+  id: string | number | undefined,
+) => void;
 
 function isObject(value: JsonValue | undefined): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -364,6 +382,12 @@ function visitPosition(
       position[1] as number,
     );
   }
+  state.coordinateObservation?.(
+    position as number[],
+    featureIndex,
+    parentPath,
+    positionIndex,
+  );
   if (state.listener?.coordinate) {
     state.listener.coordinate({
       ...(featureIndex === undefined ? {} : { featureIndex }),
@@ -825,6 +849,13 @@ function scanFeature(
     state.listener.geometry(geometrySummary(metrics));
   }
 
+  state.featureIdObservation?.(
+    index,
+    path,
+    idValid ? (hasId ? 'valid' : 'missing') : 'invalid',
+    validId,
+  );
+
   if (idValid && propertiesValid && geometryValid && state.listener?.feature) {
     state.listener.feature({
       index,
@@ -875,6 +906,12 @@ export function scanGeoJSON(
     ...(options.listener ? { listener: options.listener } : {}),
     ...(options.instrumentation
       ? { instrumentation: options.instrumentation }
+      : {}),
+    ...(options.coordinateObservation
+      ? { coordinateObservation: options.coordinateObservation }
+      : {}),
+    ...(options.featureIdObservation
+      ? { featureIdObservation: options.featureIdObservation }
       : {}),
     diagnostics:
       options.diagnostics ?? new DiagnosticCollector(options.filePath),

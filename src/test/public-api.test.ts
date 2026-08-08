@@ -21,9 +21,11 @@ test('root module exports only implemented consumer APIs', () => {
     'GeoLintPluginError',
     'GeoLintTargetError',
     'defineConfig',
+    'defineRule',
     'jsonPointer',
     'lintGeoJSON',
     'lintGeoJSONText',
+    'optionSchema',
   ]);
 });
 
@@ -50,4 +52,60 @@ test('semantic event types expose only their promised capability', () => {
   };
   void property;
   void coordinate;
+});
+
+test('rule authoring infers options, hooks, aggregate facts, and context shape', () => {
+  const schema = geolint.optionSchema.object({
+    allow: geolint.optionSchema.array(geolint.optionSchema.string()),
+  });
+  const rule = geolint.defineRule({
+    meta: {
+      name: 'type-contract',
+      schema,
+      requires: ['propertyStats'] as const,
+    },
+    create(context, options) {
+      const allowed: string[] = options.allow;
+      context.report({ message: allowed.join(',') });
+      context.report({
+        message: 'invalid context shape',
+        // @ts-expect-error severity belongs to resolved configuration
+        severity: 'error',
+      });
+      return {
+        property(event) {
+          // @ts-expect-error property() does not expose values
+          void event.value;
+        },
+        propertyValue(event) {
+          void event.value;
+        },
+        coordinate(event) {
+          // @ts-expect-error coordinate() does not expose raw lexemes
+          void event.rawValues;
+        },
+        document(summary) {
+          void summary.propertyStats.size;
+        },
+      };
+    },
+  });
+  const noOptions = geolint.defineRule({
+    meta: { name: 'no-options', schema: null },
+    create(context) {
+      return { document: () => void context.ruleId };
+    },
+  });
+  assert.equal(rule.meta.name, 'type-contract');
+  assert.equal(noOptions.meta.schema, null);
+
+  geolint.defineRule({
+    meta: { name: 'async-hooks-rejected', schema: null },
+    // @ts-expect-error V1 rule hooks are synchronous
+    create() {
+      return {
+        async coordinate() {},
+      };
+    },
+  });
 });

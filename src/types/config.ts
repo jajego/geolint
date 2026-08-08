@@ -2,7 +2,25 @@ export type Severity = 'off' | 'warn' | 'error';
 export type RuleSetting =
   Severity | readonly [Exclude<Severity, 'off'>, unknown?];
 export type RuleConfigMap = Readonly<Record<string, RuleSetting>>;
-export type BudgetConfig = Readonly<Record<string, unknown>>;
+export type BudgetSeverity = 'warn' | 'error';
+export type BudgetSetting<T> =
+  | T
+  | false
+  | {
+      readonly limit?: T;
+      readonly severity?: BudgetSeverity;
+    };
+export interface BudgetConfig {
+  readonly fileSize?: BudgetSetting<string>;
+  readonly featureCount?: BudgetSetting<number>;
+  readonly totalVertices?: BudgetSetting<number>;
+  readonly feature?:
+    | false
+    | {
+        readonly bytes?: BudgetSetting<string>;
+        readonly vertices?: BudgetSetting<number>;
+      };
+}
 export type RegressionConfig = Readonly<Record<string, unknown>>;
 export type RegressionPolicyOverride = RegressionConfig & {
   readonly baseline?: never;

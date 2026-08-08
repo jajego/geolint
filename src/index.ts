@@ -13,12 +13,29 @@ export {
   GeoLintTargetError,
 } from './engine/errors.js';
 export { jsonPointer } from './scanner/json-pointer.js';
+export { defineRule } from './rules/define-rule.js';
+export { optionSchema } from './rules/option-schema.js';
 
 export type {
   DiagnosticLimitConfig,
+  BudgetConfig,
+  BudgetSetting,
+  BudgetSeverity,
   GeoLintConfig,
   GeoLintOverride,
 } from './types/config.js';
+export type {
+  RuleContext,
+  RuleDefinition,
+  RuleDiagnosticInput,
+  RuleDocumentSummary,
+  RuleListener,
+  RuleMeta,
+} from './rules/define-rule.js';
+export type {
+  InferRuleOptions,
+  RuleOptionsSchema,
+} from './rules/option-schema.js';
 export type {
   CoordinateDimensions,
   CoordinateEvent,

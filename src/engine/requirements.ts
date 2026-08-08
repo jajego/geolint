@@ -9,6 +9,7 @@ import type {
   SkippedPolicy,
   SummaryFactName,
 } from '../types/semantic.js';
+import { GeoLintInternalError } from './errors.js';
 
 export interface SemanticListener {
   readonly featureStart?: (event: FeatureStartEvent) => void;
@@ -95,8 +96,17 @@ export function skipPolicyForIncompleteFacts(options: {
   readonly completeness: FileSummary['completeness'];
   readonly configuredSeverity?: 'warning' | 'error';
 }): SkippedPolicy | undefined {
+  const notComputed = options.requiredFacts.find(
+    (fact) => options.completeness.facts[fact] === 'not-computed',
+  );
+  if (notComputed) {
+    throw new GeoLintInternalError(
+      `Policy "${options.code}" required uncomputed fact "${notComputed}".`,
+      'GEOLINT_POLICY_PLAN_INVARIANT',
+    );
+  }
   const incompleteFacts = options.requiredFacts.filter(
-    (fact) => options.completeness.facts[fact] !== 'complete',
+    (fact) => options.completeness.facts[fact] === 'partial',
   );
   return incompleteFacts.length === 0
     ? undefined

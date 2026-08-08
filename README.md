@@ -3,9 +3,9 @@
 Fast quality gates for production GeoJSON.
 
 GeoLint is in active development. Configuration and target resolution are in
-place, along with the buffered semantic engine and the `lintGeoJSON()` and
-`lintGeoJSONText()` Node API foundations. Structural validation and built-in
-rules are coming next.
+place, along with structural recovery, the buffered semantic engine, V1 quality
+rules and semantic budgets through the `lintGeoJSON()` and `lintGeoJSONText()`
+Node APIs.
 
 ```sh
 npm install --save-dev geolint

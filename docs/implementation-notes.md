@@ -72,3 +72,21 @@ high-cardinality Position failures materialize paths only for retained
 diagnostics. In a local 500k-invalid-Position run with a retention cap of two,
 this reduced wall time from 256.4 ms to 106.2 ms while preserving all 500,000
 logical errors.
+
+## Phase 4: policy execution decisions
+
+Enabled built-ins compile in the fixed registry order documented by the V1
+catalog, independent of configuration member order. Bare budget shorthands use
+`error`; byte strings are case-sensitive and accept only `B`, `KB`, `MB`, `GB`,
+`KiB`, `MiB`, and `GiB`.
+
+The recommended coordinate-range rule initially doubled the valid coordinate
+hot-path time because the public coordinate hook requires an RFC 6901 path for
+every Position. Built-in range and ID policies therefore use narrow internal
+validated observations; public rule hooks retain their full event contracts.
+Paths and diagnostic details are materialized only for retained findings.
+
+`coordinate-precision` and `budget/feature-bytes` are registered and validated,
+but fail capability preflight until indexed numeric lexemes and exact Feature
+spans exist. Object-input file-size budgets likewise fail because exact source
+bytes cannot be reconstructed. No source values are approximated.

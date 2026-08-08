@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { GeoLintConfigError, GeoLintInputError } from '../engine/errors.js';
+import {
+  GeoLintConfigError,
+  GeoLintInputError,
+  GeoLintPluginError,
+} from '../engine/errors.js';
 import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
 
 const valid = {
@@ -115,12 +119,12 @@ test('valid JSON with an unsupported root remains an artifact diagnostic', async
   assert.equal(result.diagnostics[0]?.code, 'geojson/invalid-root');
 });
 
-test('buffered APIs never silently ignore configured policy', async () => {
+test('unknown enabled rules fail clearly', async () => {
   await assert.rejects(
     lintGeoJSON(valid, { config: { rules: { future: 'error' } } }),
     (error) =>
       error instanceof GeoLintConfigError &&
-      error.code === 'GEOLINT_UNIMPLEMENTED_POLICY',
+      error.code === 'GEOLINT_UNKNOWN_RULE',
   );
 });
 
@@ -128,9 +132,18 @@ test('config incompatibility is found before a large object validation walk', as
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;
   await assert.rejects(
-    lintGeoJSON(cyclic, { config: { budgets: { future: 1 } } }),
+    lintGeoJSON(cyclic, { config: { regression: { future: 1 } } }),
     (error) =>
       error instanceof GeoLintConfigError &&
-      error.code === 'GEOLINT_UNIMPLEMENTED_POLICY',
+      error.code === 'GEOLINT_UNIMPLEMENTED_REGRESSION',
+  );
+});
+
+test('external plugin execution fails explicitly', async () => {
+  await assert.rejects(
+    lintGeoJSON(valid, { config: { plugins: { example: {} } } }),
+    (error) =>
+      error instanceof GeoLintPluginError &&
+      error.code === 'GEOLINT_PLUGIN_LOADING_UNAVAILABLE',
   );
 });

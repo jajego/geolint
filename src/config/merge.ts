@@ -79,7 +79,10 @@ export function mergeConfig(
   return {
     plugins: mergePlugins(base.plugins, next.plugins),
     rules: mergeObject(base.rules, next.rules),
-    budgets: mergeNested(base.budgets, next.budgets),
+    budgets: mergeNested(
+      base.budgets as Readonly<Record<string, unknown>> | undefined,
+      next.budgets as Readonly<Record<string, unknown>> | undefined,
+    ),
     regression: mergeRegression(base.regression, next.regression),
     diagnostics: mergeObject(base.diagnostics, next.diagnostics),
     overrides: [...(base.overrides ?? []), ...(next.overrides ?? [])],
