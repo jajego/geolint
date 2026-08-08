@@ -100,6 +100,7 @@ function fileKey(value: string): string {
   const canonical = posix.normalize(value.replaceAll('\\', '/'));
   if (
     value.length === 0 ||
+    value.endsWith('/') ||
     value !== canonical ||
     value.includes('\\') ||
     value === '.' ||

@@ -141,6 +141,8 @@ test('baseline parser rejects noncanonical persisted file keys', () => {
     'a/../../outside.geojson',
     '/public/map.geojson',
     'C:/repo/public/map.geojson',
+    'foo/',
+    'public/map.geojson/',
     '',
   ]) {
     assert.throws(
@@ -154,6 +156,7 @@ test('baseline parser rejects noncanonical persisted file keys', () => {
       parseBaseline(
         serializeBaseline(
           createBaseline({
+            'foo.geojson': entry(),
             'public/map.geojson': entry(),
             'public/maps/cities.geojson': entry(),
             'fixtures/a.geojson': entry(),
@@ -161,7 +164,12 @@ test('baseline parser rejects noncanonical persisted file keys', () => {
         ),
       ).files,
     ),
-    ['fixtures/a.geojson', 'public/map.geojson', 'public/maps/cities.geojson'],
+    [
+      'fixtures/a.geojson',
+      'foo.geojson',
+      'public/map.geojson',
+      'public/maps/cities.geojson',
+    ],
   );
 });
 
