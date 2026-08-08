@@ -8,7 +8,7 @@ import {
   GeoLintInternalError,
 } from '../engine/errors.js';
 import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
-import { parseByteSize } from '../engine/policy.js';
+import { parseByteSize } from '../engine/byte-size.js';
 import {
   createExecutionRequirements,
   skipPolicyForIncompleteFacts,

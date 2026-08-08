@@ -104,3 +104,23 @@ public rule behavior to scanner state, so it remains deferred unless profiling
 shows material memory pressure. Feature-vertex budget findings now use the
 existing lazy diagnostic boundary, avoiding rich objects for suppressed
 findings.
+
+## Phase 5: regression and snapshot decisions
+
+An absent baseline file is treated as an empty schema-v1 baseline during
+ordinary lint, producing one explicit `no-baseline` skip for each enabled
+comparison. Snapshot creates missing baseline parent directories. Numeric
+thresholds have fixed error severity, use strict boundary comparisons, and
+require both percentage and absolute conditions when both are configured.
+
+Snapshot uses a fixed fact-rich scanner plan and never compiles rules, budgets,
+plugins, or regression. Every target must produce complete file-byte,
+Feature-count, vertex, property, geometry, and ID facts before the proposed
+baseline is serialized. Replacement uses a flushed temporary file in the
+destination directory followed by rename; failures before rename leave the
+existing baseline untouched.
+
+Schema version 1 counts every encoded Position, including Polygon closure
+Positions. Changing that meaning, even without renaming `totalVertices`,
+requires a schema-version bump. Baseline paths are project-root-relative,
+case-preserving, `/`-normalized identities; no rename inference is attempted.

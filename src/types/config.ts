@@ -21,8 +21,49 @@ export interface BudgetConfig {
         readonly vertices?: BudgetSetting<number>;
       };
 }
-export type RegressionConfig = Readonly<Record<string, unknown>>;
-export type RegressionPolicyOverride = RegressionConfig & {
+export type RegressionSeverity = Severity;
+
+export interface RegressionChecks {
+  readonly propertyTypes?: {
+    readonly widened?: RegressionSeverity;
+    readonly narrowed?: RegressionSeverity;
+    readonly changed?: RegressionSeverity;
+  };
+  readonly properties?: {
+    readonly added?: RegressionSeverity;
+    readonly removed?: RegressionSeverity;
+  };
+  readonly geometryTypes?: {
+    readonly added?: RegressionSeverity;
+    readonly removed?: RegressionSeverity;
+  };
+  readonly duplicateIds?: { readonly increased?: RegressionSeverity };
+  readonly missingIds?: { readonly increased?: RegressionSeverity };
+  readonly nullGeometries?: { readonly increased?: RegressionSeverity };
+}
+
+export interface RegressionThresholds {
+  readonly fileSizeIncrease?: {
+    readonly percentage?: number;
+    readonly minimumIncrease?: string;
+  };
+  readonly totalVerticesIncrease?: {
+    readonly percentage?: number;
+    readonly minimumIncrease?: number;
+  };
+  readonly featureCountDecrease?: {
+    readonly percentage?: number;
+    readonly minimumDecrease?: number;
+  };
+}
+
+export interface RegressionConfig {
+  readonly baseline?: string;
+  readonly checks?: RegressionChecks;
+  readonly thresholds?: RegressionThresholds;
+}
+
+export type RegressionPolicyOverride = Omit<RegressionConfig, 'baseline'> & {
   readonly baseline?: never;
 };
 

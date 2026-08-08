@@ -1,8 +1,17 @@
 import { lintGeoJSONText } from '../engine/lint-input.js';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DiagnosticCollector } from '../engine/diagnostics.js';
 import { createExecutionRequirements } from '../engine/requirements.js';
 import { scanGeoJSON, type ScanInstrumentation } from '../scanner/scan.js';
 import type { GeoLintConfig } from '../types/config.js';
+import {
+  createBaseline,
+  serializeBaseline,
+  type BaselineFileEntry,
+} from '../regression/schema.js';
+import { baselineEntryFromSummary } from '../regression/snapshot.js';
 
 interface Fixture {
   readonly name: string;
@@ -192,6 +201,112 @@ for (const [name, count, sourceFactory] of policyFixtures) {
   console.log(
     `${name.padEnd(30)} ${structuralMs.toFixed(1).padStart(10)} ${recommendedMs.toFixed(1).padStart(12)} ${`${((recommendedMs / structuralMs - 1) * 100).toFixed(1)}%`.padStart(9)}`,
   );
+}
+
+function captureBaseline(source: string, filePath: string): BaselineFileEntry {
+  const summary = scanGeoJSON(JSON.parse(source), {
+    filePath,
+    sourceBytes: Buffer.byteLength(source),
+    diagnostics: new DiagnosticCollector(filePath),
+    requirements: createExecutionRequirements({
+      facts: [
+        'featureCount',
+        'vertexCount',
+        'propertyStats',
+        'geometryStats',
+        'idStats',
+      ],
+      exactFileBytes: true,
+    }),
+  });
+  return baselineEntryFromSummary(summary);
+}
+
+const regressionDirectory = await mkdtemp(join(tmpdir(), 'geolint-benchmark-'));
+try {
+  for (const [name, , sourceFactory] of policyFixtures) {
+    const source = sourceFactory();
+    const entry = captureBaseline(source, `${name}.geojson`);
+    await writeFile(
+      join(regressionDirectory, `${name}.baseline.json`),
+      serializeBaseline(createBaseline({ [`${name}.geojson`]: entry })),
+    );
+  }
+  const regressionConfig: GeoLintConfig = {
+    extends: ['geolint/recommended'],
+    regression: {
+      checks: {
+        propertyTypes: {
+          widened: 'error',
+          narrowed: 'error',
+          changed: 'error',
+        },
+        properties: { added: 'error', removed: 'error' },
+        geometryTypes: { added: 'error', removed: 'error' },
+        duplicateIds: { increased: 'error' },
+        missingIds: { increased: 'error' },
+        nullGeometries: { increased: 'error' },
+      },
+      thresholds: {
+        fileSizeIncrease: { percentage: 0 },
+        totalVerticesIncrease: { percentage: 0 },
+        featureCountDecrease: { percentage: 0 },
+      },
+    },
+  };
+  console.log(
+    '\nrecommended vs regression vs snapshot  recommended  regression  snapshot',
+  );
+  for (const [name, , sourceFactory] of policyFixtures) {
+    const source = sourceFactory();
+    const recommendedStarted = performance.now();
+    await lintGeoJSONText(source);
+    const recommendedMs = performance.now() - recommendedStarted;
+    const regressionStarted = performance.now();
+    const result = await lintGeoJSONText(source, {
+      cwd: regressionDirectory,
+      filename: `${name}.geojson`,
+      config: {
+        ...regressionConfig,
+        regression: {
+          ...regressionConfig.regression,
+          baseline: `${name}.baseline.json`,
+        },
+      },
+    });
+    const regressionMs = performance.now() - regressionStarted;
+    const snapshotStarted = performance.now();
+    captureBaseline(source, `${name}.geojson`);
+    const snapshotMs = performance.now() - snapshotStarted;
+    if (result.errorCount !== 0 || result.skippedPolicies.length !== 0) {
+      throw new Error(`Regression benchmark fixture ${name} was not clean.`);
+    }
+    console.log(
+      `${name.padEnd(36)} ${recommendedMs.toFixed(1).padStart(11)} ${regressionMs.toFixed(1).padStart(11)} ${snapshotMs.toFixed(1).padStart(9)}`,
+    );
+  }
+  const baselineProperties = Object.fromEntries(
+    Array.from({ length: 50 }, (_, index) => [`p${index}`, index]),
+  );
+  const baselineSizeSource = JSON.stringify({
+    type: 'FeatureCollection',
+    features: Array.from({ length: 5_000 }, (_, id) => ({
+      type: 'Feature',
+      id,
+      properties: baselineProperties,
+      geometry: { type: 'Point', coordinates: [0, 0] },
+    })),
+  });
+  const compactBaseline = serializeBaseline(
+    createBaseline({
+      'many.geojson': captureBaseline(baselineSizeSource, 'many.geojson'),
+    }),
+  );
+  console.log(
+    `baseline-size input=${Buffer.byteLength(baselineSizeSource)}B baseline=${Buffer.byteLength(compactBaseline)}B properties=50`,
+  );
+} finally {
+  await rm(regressionDirectory, { recursive: true, force: true });
 }
 
 async function failingPolicy(

@@ -132,10 +132,12 @@ test('config incompatibility is found before a large object validation walk', as
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;
   await assert.rejects(
-    lintGeoJSON(cyclic, { config: { regression: { future: 1 } } }),
+    lintGeoJSON(cyclic, {
+      config: { regression: { future: 1 } as never },
+    }),
     (error) =>
       error instanceof GeoLintConfigError &&
-      error.code === 'GEOLINT_UNIMPLEMENTED_REGRESSION',
+      error.code === 'GEOLINT_INVALID_CONFIG',
   );
 });
 

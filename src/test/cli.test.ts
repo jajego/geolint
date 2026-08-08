@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -19,6 +19,39 @@ test('CLI help documents print-config argument syntax', async () => {
 
   assert.equal(stderr, '');
   assert.match(stdout, /--print-config <file>/);
+  assert.match(stdout, /snapshot \[targets\.\.\.\]/);
+});
+
+test('snapshot command writes a baseline and prints its proposal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geolint-cli-snapshot-'));
+  try {
+    await writeFile(
+      join(root, 'geolint.json'),
+      JSON.stringify({ files: ['map.geojson'] }),
+    );
+    await writeFile(
+      join(root, 'map.geojson'),
+      JSON.stringify({ type: 'Point', coordinates: [0, 0] }),
+    );
+    const { stdout, stderr } = await run(
+      ['--config', 'geolint.json', 'snapshot'],
+      root,
+    );
+    assert.equal(stderr, '');
+    assert.deepEqual(
+      JSON.parse(stdout).added.map(
+        ({ filePath }: { filePath: string }) => filePath,
+      ),
+      ['map.geojson'],
+    );
+    assert.equal(
+      JSON.parse(await readFile(join(root, '.geolint-baseline.json'), 'utf8'))
+        .schemaVersion,
+      1,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('print-config uses an explicit config and applies overrides', async () => {

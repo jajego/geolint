@@ -1,4 +1,8 @@
-import type { GeoLintConfig, GeoLintOverride } from '../types/config.js';
+import type {
+  GeoLintConfig,
+  GeoLintOverride,
+  RegressionConfig,
+} from '../types/config.js';
 import { GeoLintConfigError } from '../engine/errors.js';
 
 function mergeObject<T extends object>(
@@ -33,10 +37,13 @@ function mergeNested(
 }
 
 function mergeRegression(
-  base: Readonly<Record<string, unknown>> | undefined,
-  next: Readonly<Record<string, unknown>> | undefined,
-): Readonly<Record<string, unknown>> {
-  const merged = mergeNested(base, next) as Record<string, unknown>;
+  base: RegressionConfig | undefined,
+  next: RegressionConfig | undefined,
+): RegressionConfig {
+  const merged = mergeNested(
+    base as Readonly<Record<string, unknown>> | undefined,
+    next as Readonly<Record<string, unknown>> | undefined,
+  ) as Record<string, unknown>;
   const baseThresholds = base?.thresholds;
   const nextThresholds = next?.thresholds;
   if (
@@ -52,7 +59,7 @@ function mergeRegression(
       ...(nextThresholds as Record<string, unknown>),
     };
   }
-  return merged;
+  return merged as RegressionConfig;
 }
 
 function mergePlugins(

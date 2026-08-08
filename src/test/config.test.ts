@@ -423,3 +423,47 @@ test('logical paths normalize separators and dot segments project-relatively', (
     'public/map.geojson',
   );
 });
+
+test('regression config is strict at every level', () => {
+  const invalid = [
+    { cheks: {} },
+    { checks: { future: {} } },
+    { checks: { propertyTypes: { widenend: 'error' } } },
+    { checks: { properties: { added: 'fatal' } } },
+    { checks: { geometryTypes: { typo: 'warn' } } },
+    { checks: { duplicateIds: { increase: 'error' } } },
+    { thresholds: { totalVertexIncrease: {} } },
+    { thresholds: { totalVerticesIncrease: {} } },
+    { thresholds: { totalVerticesIncrease: { percentage: -1 } } },
+    {
+      thresholds: {
+        featureCountDecrease: { minimumDecrease: 1.5 },
+      },
+    },
+    {
+      thresholds: {
+        fileSizeIncrease: { minimumIncrease: '1mb' },
+      },
+    },
+  ];
+  for (const regression of invalid) {
+    assert.throws(
+      () => validateConfig({ regression } as never),
+      GeoLintConfigError,
+    );
+  }
+
+  assert.doesNotThrow(() =>
+    validateConfig({
+      regression: {
+        baseline: 'history/baseline.json',
+        checks: { propertyTypes: { widened: 'warn', narrowed: 'off' } },
+        thresholds: {
+          fileSizeIncrease: { percentage: 0, minimumIncrease: '1KB' },
+          totalVerticesIncrease: { minimumIncrease: 0 },
+          featureCountDecrease: { percentage: 10 },
+        },
+      },
+    }),
+  );
+});

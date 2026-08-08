@@ -1,4 +1,5 @@
 import { assertGlob } from './glob.js';
+import { parseByteSize } from '../engine/byte-size.js';
 import { GeoLintConfigError } from '../engine/errors.js';
 import type { GeoLintConfig } from '../types/config.js';
 
@@ -88,15 +89,156 @@ function validateDiagnostics(value: unknown, path: string): void {
   }
 }
 
+function validateSeverities(
+  value: unknown,
+  allowed: readonly string[],
+  path: string,
+): void {
+  const settings = record(value, path);
+  validateKnownKeys(settings, new Set(allowed), path);
+  for (const [key, severity] of Object.entries(settings)) {
+    if (!['off', 'warn', 'error'].includes(String(severity))) {
+      fail(`${path}.${key}`, 'off, warn, or error');
+    }
+  }
+}
+
+function validatePercentage(value: unknown, path: string): void {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    fail(path, 'a non-negative finite number');
+  }
+}
+
+function validateCount(value: unknown, path: string): void {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    fail(path, 'a non-negative safe integer');
+  }
+}
+
+function validateThreshold(
+  value: unknown,
+  path: string,
+  absoluteKey: 'minimumIncrease' | 'minimumDecrease',
+  bytes = false,
+): void {
+  const threshold = record(value, path);
+  validateKnownKeys(threshold, new Set(['percentage', absoluteKey]), path);
+  if (!('percentage' in threshold) && !(absoluteKey in threshold)) {
+    fail(path, `an object containing percentage or ${absoluteKey}`);
+  }
+  if ('percentage' in threshold) {
+    validatePercentage(threshold.percentage, `${path}.percentage`);
+  }
+  if (absoluteKey in threshold) {
+    if (bytes) {
+      try {
+        parseByteSize(threshold[absoluteKey], `${path}.${absoluteKey}`);
+      } catch {
+        fail(`${path}.${absoluteKey}`, 'a valid byte-size string');
+      }
+    } else {
+      validateCount(threshold[absoluteKey], `${path}.${absoluteKey}`);
+    }
+  }
+}
+
+function validateRegression(value: unknown, path: string): void {
+  const regression = record(value, path);
+  validateKnownKeys(
+    regression,
+    new Set(['baseline', 'checks', 'thresholds']),
+    path,
+  );
+  if (
+    'baseline' in regression &&
+    (typeof regression.baseline !== 'string' ||
+      regression.baseline.length === 0)
+  ) {
+    fail(`${path}.baseline`, 'a non-empty string');
+  }
+  if ('checks' in regression) {
+    const checks = record(regression.checks, `${path}.checks`);
+    validateKnownKeys(
+      checks,
+      new Set([
+        'propertyTypes',
+        'properties',
+        'geometryTypes',
+        'duplicateIds',
+        'missingIds',
+        'nullGeometries',
+      ]),
+      `${path}.checks`,
+    );
+    if ('propertyTypes' in checks)
+      validateSeverities(
+        checks.propertyTypes,
+        ['widened', 'narrowed', 'changed'],
+        `${path}.checks.propertyTypes`,
+      );
+    if ('properties' in checks)
+      validateSeverities(
+        checks.properties,
+        ['added', 'removed'],
+        `${path}.checks.properties`,
+      );
+    if ('geometryTypes' in checks)
+      validateSeverities(
+        checks.geometryTypes,
+        ['added', 'removed'],
+        `${path}.checks.geometryTypes`,
+      );
+    for (const name of [
+      'duplicateIds',
+      'missingIds',
+      'nullGeometries',
+    ] as const) {
+      if (name in checks)
+        validateSeverities(
+          checks[name],
+          ['increased'],
+          `${path}.checks.${name}`,
+        );
+    }
+  }
+  if ('thresholds' in regression) {
+    const thresholds = record(regression.thresholds, `${path}.thresholds`);
+    validateKnownKeys(
+      thresholds,
+      new Set([
+        'fileSizeIncrease',
+        'totalVerticesIncrease',
+        'featureCountDecrease',
+      ]),
+      `${path}.thresholds`,
+    );
+    if ('fileSizeIncrease' in thresholds)
+      validateThreshold(
+        thresholds.fileSizeIncrease,
+        `${path}.thresholds.fileSizeIncrease`,
+        'minimumIncrease',
+        true,
+      );
+    if ('totalVerticesIncrease' in thresholds)
+      validateThreshold(
+        thresholds.totalVerticesIncrease,
+        `${path}.thresholds.totalVerticesIncrease`,
+        'minimumIncrease',
+      );
+    if ('featureCountDecrease' in thresholds)
+      validateThreshold(
+        thresholds.featureCountDecrease,
+        `${path}.thresholds.featureCountDecrease`,
+        'minimumDecrease',
+      );
+  }
+}
+
 function validatePolicy(value: Record<string, unknown>, path: string): void {
   if ('rules' in value) validateRules(value.rules, `${path}.rules`);
   if ('budgets' in value) record(value.budgets, `${path}.budgets`);
-  if ('regression' in value) {
-    const regression = record(value.regression, `${path}.regression`);
-    if ('baseline' in regression && typeof regression.baseline !== 'string') {
-      fail(`${path}.regression.baseline`, 'a string');
-    }
-  }
+  if ('regression' in value)
+    validateRegression(value.regression, `${path}.regression`);
   if ('diagnostics' in value)
     validateDiagnostics(value.diagnostics, `${path}.diagnostics`);
 }

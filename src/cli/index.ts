@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { resolveTargets } from './targets.js';
 import { resolveFileConfig } from '../config/resolve.js';
 import { resolveRuntimeConfig } from '../config/runtime.js';
+import { snapshotBaseline } from '../regression/snapshot.js';
 
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({
@@ -26,8 +27,19 @@ async function main(): Promise<void> {
   }
   if (values.help || (positionals.length === 0 && !values['print-config'])) {
     console.log(
-      'Usage: geolint <targets...>\n       geolint --print-config <file>',
+      'Usage: geolint <targets...>\n       geolint snapshot [targets...]\n       geolint --print-config <file>',
     );
+    return;
+  }
+
+  if (positionals[0] === 'snapshot') {
+    const targets = positionals.slice(1);
+    const result = await snapshotBaseline({
+      ...(values.config ? { config: values.config } : {}),
+      ...(values['no-config'] ? { noConfig: true } : {}),
+      ...(targets.length === 0 ? {} : { targets }),
+    });
+    console.log(JSON.stringify(result.proposal, null, 2));
     return;
   }
 

@@ -6,6 +6,13 @@ import { DiagnosticCollector } from './diagnostics.js';
 import { compilePolicy, type CompiledPolicy } from './policy.js';
 import { createExecutionRequirements } from './requirements.js';
 import { scanGeoJSON } from '../scanner/scan.js';
+import {
+  loadBaseline,
+  regressionIdentity,
+  resolveBaselinePath,
+} from '../regression/baseline-io.js';
+import { hasEnabledRegression } from '../regression/compare.js';
+import type { BaselineFileEntry } from '../regression/schema.js';
 import type { GeoLintRuntimeContext, ResolvedConfig } from '../types/config.js';
 import type {
   FileLintResult,
@@ -84,6 +91,16 @@ function scanResult(
   return fileResult(collector, startedAt, summary, policy.finish(summary));
 }
 
+async function regressionBaseline(
+  config: ResolvedConfig,
+  filePath: string,
+): Promise<BaselineFileEntry | undefined> {
+  if (!hasEnabledRegression(config.regression)) return undefined;
+  const identity = regressionIdentity(filePath);
+  const baseline = await loadBaseline(resolveBaselinePath(config));
+  return baseline.files[identity];
+}
+
 export async function lintGeoJSONText(
   text: string,
   options: InMemoryLintOptions = {},
@@ -100,11 +117,13 @@ export async function lintGeoJSONText(
     context.filePath,
     context.config.diagnostics,
   );
+  const baseline = await regressionBaseline(context.config, context.filePath);
   const policy = compilePolicy(
     context.config,
     context.filePath,
     'text',
     collector,
+    baseline,
   );
   const parsed = parseBufferedJSON(text);
   if (!parsed.ok) {
@@ -134,11 +153,13 @@ export async function lintGeoJSON(
     context.filePath,
     context.config.diagnostics,
   );
+  const baseline = await regressionBaseline(context.config, context.filePath);
   const policy = compilePolicy(
     context.config,
     context.filePath,
     'object',
     collector,
+    baseline,
   );
   assertJsonValue(value);
   return scanResult(value, collector, policy, startedAt);

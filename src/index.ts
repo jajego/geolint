@@ -23,6 +23,11 @@ export type {
   BudgetSeverity,
   GeoLintConfig,
   GeoLintOverride,
+  RegressionChecks,
+  RegressionConfig,
+  RegressionPolicyOverride,
+  RegressionSeverity,
+  RegressionThresholds,
 } from './types/config.js';
 export type {
   RuleContext,
