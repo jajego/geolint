@@ -50,8 +50,14 @@ test('semantic event types expose only their promised capability', () => {
     // @ts-expect-error coordinate() does not provide numeric lexemes
     void event.rawValues;
   };
+  const coordinateLexeme = (event: geolint.CoordinateLexemeEvent) => {
+    void event.values;
+    void event.rawValues;
+    void event.byteOffset;
+  };
   void property;
   void coordinate;
+  void coordinateLexeme;
 });
 
 test('rule authoring infers options, hooks, aggregate facts, and context shape', () => {
@@ -62,7 +68,7 @@ test('rule authoring infers options, hooks, aggregate facts, and context shape',
     meta: {
       name: 'type-contract',
       schema,
-      requires: ['propertyStats'] as const,
+      requires: ['propertyStats', 'derivedExtent'] as const,
     },
     create(context, options) {
       const allowed: string[] = options.allow;
@@ -84,8 +90,24 @@ test('rule authoring infers options, hooks, aggregate facts, and context shape',
           // @ts-expect-error coordinate() does not expose raw lexemes
           void event.rawValues;
         },
+        coordinateLexeme(event) {
+          void event.values;
+          void event.rawValues;
+        },
         document(summary) {
           void summary.propertyStats.size;
+          void summary.derivedExtent.west;
+          const propertyStatus: 'complete' =
+            summary.completeness.facts.propertyStats;
+          const extentStatus: 'complete' =
+            summary.completeness.facts.derivedExtent;
+          // @ts-expect-error unrequired facts retain their ordinary status
+          const idStatus: 'complete' = summary.completeness.facts.idStats;
+          // @ts-expect-error unrequired facts remain optional
+          void summary.ids.present;
+          void propertyStatus;
+          void extentStatus;
+          void idStatus;
         },
       };
     },
@@ -106,6 +128,30 @@ test('rule authoring infers options, hooks, aggregate facts, and context shape',
       return {
         async coordinate() {},
       };
+    },
+  });
+
+  geolint.defineRule({
+    meta: {
+      name: 'manual-capability-rejected',
+      schema: null,
+      // @ts-expect-error capabilities are derived from hook subscriptions
+      capability: 'numeric-lexemes',
+    },
+    create() {
+      return {};
+    },
+  });
+
+  // @ts-expect-error aggregate requirements require a document hook
+  geolint.defineRule({
+    meta: {
+      name: 'requires-document',
+      schema: null,
+      requires: ['propertyStats'] as const,
+    },
+    create() {
+      return { coordinate() {} };
     },
   });
 });

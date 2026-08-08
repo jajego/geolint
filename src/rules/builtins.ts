@@ -312,10 +312,12 @@ const coordinatePrecision = defineRule({
         6,
       ),
     }),
-    capability: 'numeric-lexemes' as const,
   },
   create() {
-    return {};
+    return {
+      // The hook is the capability declaration; indexed parsing will supply it.
+      coordinateLexeme() {},
+    };
   },
 });
 

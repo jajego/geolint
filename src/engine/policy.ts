@@ -4,6 +4,7 @@ import type {
   CoordinateObservation,
   FeatureIdObservation,
 } from '../scanner/scan.js';
+import { validateRuleListener } from '../rules/define-rule.js';
 import type {
   RuleContext,
   RuleDiagnosticInput,
@@ -41,7 +42,6 @@ interface ErasedRule {
     readonly name: string;
     readonly schema: RuleOptionsSchema<unknown> | null;
     readonly requires?: readonly SummaryFactName[];
-    readonly capability?: 'numeric-lexemes';
   };
   readonly create: (
     context: RuleContext,
@@ -128,6 +128,11 @@ function composite(
       listener.coordinate ? [listener.coordinate] : [],
     ),
   );
+  const coordinateLexeme = combine(
+    listeners.flatMap((listener) =>
+      listener.coordinateLexeme ? [listener.coordinateLexeme] : [],
+    ),
+  );
   const geometry = combine(
     listeners.flatMap((listener) =>
       listener.geometry ? [listener.geometry] : [],
@@ -143,6 +148,7 @@ function composite(
     ...(property ? { property } : {}),
     ...(propertyValue ? { propertyValue } : {}),
     ...(coordinate ? { coordinate } : {}),
+    ...(coordinateLexeme ? { coordinateLexeme } : {}),
     ...(geometry ? { geometry } : {}),
     ...(feature ? { feature } : {}),
   };
@@ -203,7 +209,16 @@ function compileRules(
         `rules.${rule.meta.name}`,
       );
     }
-    if (rule.meta.capability === 'numeric-lexemes') {
+    const ruleContext = context(
+      rule.meta.name,
+      filePath,
+      compiled.severity,
+      diagnostics,
+    );
+    const instance = rule.create(ruleContext, options);
+    const requires = rule.meta.requires ?? [];
+    validateRuleListener(rule.meta.name, requires, instance);
+    if (instance.coordinateLexeme) {
       throw new GeoLintCapabilityError(
         inputKind === 'object'
           ? `Rule "${rule.meta.name}" requires numeric source lexemes, which parsed object input cannot provide.`
@@ -211,12 +226,6 @@ function compileRules(
         'GEOLINT_CAPABILITY_NUMERIC_LEXEMES',
       );
     }
-    const ruleContext = context(
-      rule.meta.name,
-      filePath,
-      compiled.severity,
-      diagnostics,
-    );
     if (rule.meta.name === 'require-feature-id') {
       featureIdObservations.push((index, path, status) => {
         if (status === 'missing') {
@@ -296,10 +305,8 @@ function compileRules(
       );
       continue;
     }
-    const instance = rule.create(ruleContext, options);
     const { document, ...local } = instance;
     if (Object.keys(local).length > 0) listeners.push(local);
-    const requires = rule.meta.requires ?? [];
     for (const fact of requires) facts.add(fact);
     if (document) {
       aggregates.push({
@@ -357,6 +364,15 @@ function normalizeBudget<T>(
       ? value
       : undefined
   ) as { readonly limit?: T; readonly severity?: BudgetSeverity } | undefined;
+  const unknown = object
+    ? Object.keys(object).find((key) => key !== 'limit' && key !== 'severity')
+    : undefined;
+  if (unknown) {
+    throw new GeoLintConfigError(
+      `Unknown option "${unknown}" for budget "${path.slice('budgets.'.length)}".`,
+      'GEOLINT_INVALID_BUDGET',
+    );
+  }
   const limit = parseLimit(object ? object.limit : value, `${path}.limit`);
   const configuredSeverity = object?.severity ?? 'error';
   if (configuredSeverity !== 'warn' && configuredSeverity !== 'error') {
@@ -387,20 +403,20 @@ function reportBudget(
   limit: number,
   feature?: FeatureSummary,
 ): void {
-  diagnostics.report({
-    code,
-    source: 'budget',
-    severity: configuredSeverity,
-    message,
-    data: { actual, limit },
-    ...(feature
-      ? {
-          featureIndex: feature.index,
-          ...(feature.id === undefined ? {} : { featureId: feature.id }),
-          path: feature.path,
-        }
-      : {}),
-  });
+  diagnostics.reportLazy(
+    { code, source: 'budget', severity: configuredSeverity },
+    () => ({
+      message,
+      data: { actual, limit },
+      ...(feature
+        ? {
+            featureIndex: feature.index,
+            ...(feature.id === undefined ? {} : { featureId: feature.id }),
+            path: feature.path,
+          }
+        : {}),
+    }),
+  );
 }
 
 function compileBudgets(

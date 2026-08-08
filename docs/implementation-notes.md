@@ -90,3 +90,17 @@ Paths and diagnostic details are materialized only for retained findings.
 but fail capability preflight until indexed numeric lexemes and exact Feature
 spans exist. Object-input file-size budgets likewise fail because exact source
 bytes cannot be reconstructed. No source values are approximated.
+
+`coordinateLexeme()` is the public capability boundary: subscribing requests
+positions and numeric lexemes automatically, while ordinary `coordinate()`
+remains lexeme-free. Required aggregate facts narrow both their values and
+completeness statuses, and a non-empty `meta.requires` must have a `document()`
+consumer. Budget setting objects reject fields other than `limit` and
+`severity`.
+
+The recommended ID rules currently keep separate duplicate-tracking sets in
+the scanner aggregate and the local uniqueness rule. Sharing them would couple
+public rule behavior to scanner state, so it remains deferred unless profiling
+shows material memory pressure. Feature-vertex budget findings now use the
+existing lazy diagnostic boundary, avoiding rich objects for suppressed
+findings.

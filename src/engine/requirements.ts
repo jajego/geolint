@@ -1,5 +1,6 @@
 import type {
   CoordinateEvent,
+  CoordinateLexemeEvent,
   FeatureStartEvent,
   FeatureSummary,
   FileSummary,
@@ -16,6 +17,7 @@ export interface SemanticListener {
   readonly property?: (event: PropertyEvent) => void;
   readonly propertyValue?: (event: PropertyValueEvent) => void;
   readonly coordinate?: (event: CoordinateEvent) => void;
+  readonly coordinateLexeme?: (event: CoordinateLexemeEvent) => void;
   readonly geometry?: (summary: GeometrySummary) => void;
   readonly feature?: (summary: FeatureSummary) => void;
   readonly document?: (summary: FileSummary) => void;
@@ -29,6 +31,7 @@ export interface ExecutionRequirements {
   readonly propertyTypes: boolean;
   readonly propertyValues: boolean;
   readonly positions: boolean;
+  readonly numericLexemes: boolean;
   readonly vertexCounts: boolean;
   readonly ringCounts: boolean;
   readonly geometryNodeCounts: boolean;
@@ -58,6 +61,7 @@ export function createExecutionRequirements(
   const vertexCounts = facts.has('vertexCount');
   const coordinateDimensions = facts.has('coordinateDimensionStats');
   const geographicExtents = facts.has('derivedExtent');
+  const numericLexemes = Boolean(listener?.coordinateLexeme);
 
   return Object.freeze({
     geometrySummaries,
@@ -71,6 +75,7 @@ export function createExecutionRequirements(
     propertyValues: Boolean(listener?.propertyValue),
     positions:
       Boolean(listener?.coordinate) ||
+      numericLexemes ||
       vertexCounts ||
       coordinateDimensions ||
       geographicExtents ||
@@ -83,6 +88,7 @@ export function createExecutionRequirements(
     coordinateDimensions,
     propertyStats,
     idStats,
+    numericLexemes,
     exactFileBytes: options.exactFileBytes ?? false,
   });
 }

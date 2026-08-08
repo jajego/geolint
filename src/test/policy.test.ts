@@ -9,7 +9,11 @@ import {
 } from '../engine/errors.js';
 import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
 import { parseByteSize } from '../engine/policy.js';
-import { skipPolicyForIncompleteFacts } from '../engine/requirements.js';
+import {
+  createExecutionRequirements,
+  skipPolicyForIncompleteFacts,
+} from '../engine/requirements.js';
+import { validateRuleListener } from '../rules/define-rule.js';
 import type { GeoLintConfig } from '../types/config.js';
 import type {
   FileLintResult,
@@ -350,6 +354,39 @@ test('source-aware policies fail capability preflight for both input APIs', asyn
       (error) => error instanceof GeoLintCapabilityError,
     );
   }
+
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  await assert.rejects(
+    lintGeoJSON(cyclic, {
+      config: { rules: { 'coordinate-precision': 'error' } },
+    }),
+    (error) => error instanceof GeoLintCapabilityError,
+  );
+});
+
+test('coordinateLexeme subscriptions derive their execution capability', () => {
+  const requirements = createExecutionRequirements({
+    listener: { coordinateLexeme() {} },
+  });
+  assert.equal(requirements.positions, true);
+  assert.equal(requirements.numericLexemes, true);
+  assert.equal(createExecutionRequirements().numericLexemes, false);
+});
+
+test('aggregate requirements require a document hook', () => {
+  assert.throws(
+    () => validateRuleListener('broken', ['propertyStats'], {}),
+    (error) =>
+      error instanceof GeoLintInternalError &&
+      error.code === 'GEOLINT_INVALID_RULE_DEFINITION',
+  );
+  assert.doesNotThrow(() => validateRuleListener('local', [], {}));
+  assert.doesNotThrow(() =>
+    validateRuleListener('aggregate', ['propertyStats'], {
+      document() {},
+    }),
+  );
 });
 
 test('file-size budget requires source bytes and uses exact UTF-8 size', async () => {
@@ -447,6 +484,35 @@ test('byte units are owned, exact, and case-sensitive', () => {
   for (const value of ['1mb', '1', 'wat', '999999999999999999GB']) {
     assert.throws(() => parseByteSize(value, 'test'), GeoLintConfigError);
   }
+});
+
+test('budget setting objects reject unknown keys without breaking valid forms', async () => {
+  const cases = [
+    { fileSize: { limit: '1MB', typo: true } },
+    { featureCount: { limit: 1, typo: true } },
+    { totalVertices: { limit: 1, typo: true } },
+    { feature: { vertices: { limit: 1, typo: true } } },
+    { feature: { bytes: { limit: '1KB', typo: true } } },
+    { feature: { vertices: { limit: 1, severty: 'warn' } } },
+  ];
+  for (const budgets of cases) {
+    await assert.rejects(
+      lintGeoJSON(feature(1, {}), {
+        config: { budgets } as unknown as GeoLintConfig,
+      }),
+      (error) => error instanceof GeoLintConfigError,
+    );
+  }
+
+  await assert.doesNotReject(
+    lint(feature(1, {}), {
+      budgets: {
+        featureCount: 1,
+        totalVertices: { limit: 1, severity: 'warn' },
+        feature: { vertices: false },
+      },
+    }),
+  );
 });
 
 test('recommended and web presets resolve exact V5 membership', async () => {
