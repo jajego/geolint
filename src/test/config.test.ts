@@ -418,10 +418,12 @@ test('merge semantics preserve each V5 field contract', () => {
 });
 
 test('logical paths normalize separators and dot segments project-relatively', () => {
-  assert.equal(
-    normalizeFilePath('C:/project', 'public\\maps\\..\\map.geojson'),
-    'public/map.geojson',
-  );
+  const projectRoot = process.platform === 'win32' ? 'C:\\project' : '/project';
+  const filePath =
+    process.platform === 'win32'
+      ? 'C:\\project\\public\\maps\\..\\map.geojson'
+      : '/project/public/maps/../map.geojson';
+  assert.equal(normalizeFilePath(projectRoot, filePath), 'public/map.geojson');
 });
 
 test('regression config is strict at every level', () => {

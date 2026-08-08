@@ -285,6 +285,7 @@ test('high-cardinality regression findings use shared diagnostic limits', () => 
   assert.equal(diagnostics.errorCount, 1_000);
   assert.equal(diagnostics.diagnostics.length, 2);
   assert.equal(diagnostics.suppressedDiagnostics[0]?.suppressedCount, 998);
+  assert.equal(diagnostics.lazyDetailCount, 2);
 });
 
 test('regression exposes no-baseline and incomplete-fact skips', () => {

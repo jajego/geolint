@@ -42,6 +42,7 @@ export class DiagnosticCollector {
   #suppressionOrder = 0;
   errorCount = 0;
   warningCount = 0;
+  lazyDetailCount = 0;
 
   constructor(
     readonly filePath: string,
@@ -61,6 +62,7 @@ export class DiagnosticCollector {
     const severity = header.severity ?? 'error';
     // Suppressed hot-path findings never build messages, paths, or detail objects.
     if (!this.#retain(header.code, severity)) return;
+    this.lazyDetailCount += 1;
     this.diagnostics.push({
       ...details(),
       ...header,

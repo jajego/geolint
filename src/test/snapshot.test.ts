@@ -268,3 +268,78 @@ test('snapshot schema is independent of ordinary and regression policy', async (
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('snapshot proposals ignore old baseline map insertion order and are idempotent', async () => {
+  const directory = await project();
+  try {
+    await writeGeoJSON(directory, 'map.geojson', {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 'a',
+          properties: { a: 1, z: 'x' },
+          geometry: { type: 'Point', coordinates: [0, 0] },
+        },
+        {
+          type: 'Feature',
+          id: 'b',
+          properties: { a: 2, z: 'y' },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [0, 0],
+                [1, 0],
+                [0, 0],
+                [0, 0],
+              ],
+            ],
+          },
+        },
+      ],
+    });
+    const initial = await snapshotBaseline({
+      cwd: directory,
+      targets: ['map.geojson'],
+      config: { regression: { baseline: 'baseline.json' } },
+    });
+    const canonical = initial.baseline.files['map.geojson']!;
+    const unordered = {
+      ...canonical,
+      featureGeometryTypes: { Polygon: 1, Point: 1 },
+      properties: { z: canonical.properties.z, a: canonical.properties.a },
+    };
+    const baselinePath = join(directory, 'baseline.json');
+    await writeFile(
+      baselinePath,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          geolintVersion: '0',
+          files: { 'map.geojson': unordered },
+        },
+        null,
+        2,
+      ),
+    );
+    const first = await snapshotBaseline({
+      cwd: directory,
+      targets: ['map.geojson'],
+      config: { regression: { baseline: 'baseline.json' } },
+    });
+    assert.deepEqual(first.proposal.updated, []);
+    assert.deepEqual(first.proposal.unchanged, ['map.geojson']);
+    const bytes = await readFile(baselinePath, 'utf8');
+    const second = await snapshotBaseline({
+      cwd: directory,
+      targets: ['map.geojson'],
+      config: { regression: { baseline: 'baseline.json' } },
+    });
+    assert.deepEqual(second.proposal.updated, []);
+    assert.deepEqual(second.proposal.added, []);
+    assert.equal(await readFile(baselinePath, 'utf8'), bytes);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

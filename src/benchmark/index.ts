@@ -11,6 +11,7 @@ import {
   serializeBaseline,
   type BaselineFileEntry,
 } from '../regression/schema.js';
+import { compileRegression } from '../regression/compare.js';
 import { baselineEntryFromSummary } from '../regression/snapshot.js';
 
 interface Fixture {
@@ -308,6 +309,49 @@ try {
 } finally {
   await rm(regressionDirectory, { recursive: true, force: true });
 }
+
+const regressionSuppressionSource = wideProperties(100_000);
+const regressionSuppressionDiagnostics = new DiagnosticCollector(
+  '<benchmark>',
+  {
+    maxPerCodePerFile: 2,
+    maxPerFile: 2,
+  },
+);
+const regressionSuppressionSummary = scanGeoJSON(
+  JSON.parse(regressionSuppressionSource),
+  {
+    filePath: '<benchmark>',
+    sourceBytes: Buffer.byteLength(regressionSuppressionSource),
+    diagnostics: regressionSuppressionDiagnostics,
+    requirements: createExecutionRequirements({ facts: ['propertyStats'] }),
+  },
+);
+const regressionSuppression = compileRegression(
+  { checks: { properties: { added: 'error' } } },
+  'text',
+  regressionSuppressionDiagnostics,
+  {
+    bytes: 0,
+    featureCount: 1,
+    totalVertices: 1,
+    largestFeatureVertices: 1,
+    featureGeometryTypes: { Point: 1 },
+    properties: {},
+    ids: { missing: 0, duplicates: 0, string: 0, number: 0 },
+    nullGeometries: 0,
+  },
+);
+const regressionSuppressionStarted = performance.now();
+regressionSuppression.finish(regressionSuppressionSummary);
+const regressionSuppressionElapsed =
+  performance.now() - regressionSuppressionStarted;
+console.log(
+  `regression-property-added-100k ${regressionSuppressionElapsed.toFixed(1)}ms ` +
+    `${regressionSuppressionDiagnostics.diagnostics.length}/${regressionSuppressionDiagnostics.errorCount} kept/errors ` +
+    `${regressionSuppressionDiagnostics.suppressedDiagnostics[0]?.suppressedCount ?? 0} suppressed ` +
+    `${regressionSuppressionDiagnostics.lazyDetailCount} details`,
+);
 
 async function failingPolicy(
   name: string,

@@ -124,3 +124,11 @@ Schema version 1 counts every encoded Position, including Polygon closure
 Positions. Changing that meaning, even without renaming `totalVertices`,
 requires a schema-version bump. Baseline paths are project-root-relative,
 case-preserving, `/`-normalized identities; no rename inference is attempted.
+
+Persisted baseline entry keys use a platform-independent POSIX grammar and
+must already be canonical: relative, `/`-separated, non-empty, non-traversing,
+and free of dot segments. Filesystem resolution remains host-native. Baseline
+parsing canonicalizes unordered summary maps before exact snapshot comparison.
+The reader also rejects impossible count relationships: properties and IDs must
+account for every Feature, geometry plus null counts must do the same, and
+duplicate occurrences cannot exceed present ID occurrences minus one.

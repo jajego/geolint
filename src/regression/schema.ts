@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
+import { posix } from 'node:path';
 
-import { normalizePath } from '../config/glob.js';
 import { GeoLintIOError } from '../engine/errors.js';
 import type { GeoJSONGeometryType, JsonValueType } from '../types/semantic.js';
 
@@ -97,10 +97,11 @@ function count(value: unknown, path: string, positive = false): number {
 }
 
 function fileKey(value: string): string {
-  const normalized = normalizePath(value);
+  const canonical = posix.normalize(value.replaceAll('\\', '/'));
   if (
     value.length === 0 ||
-    value !== normalized ||
+    value !== canonical ||
+    value.includes('\\') ||
     value === '.' ||
     value === '..' ||
     value.startsWith('../') ||
@@ -118,12 +119,16 @@ function parseProperty(value: unknown, path: string): BaselinePropertyEntry {
   const present = count(entry.present, `${path}.present`, true);
   const missing = count(entry.missing, `${path}.missing`);
   const rawTypes = object(entry.types, `${path}.types`);
-  const types: Partial<Record<JsonValueType, number>> = {};
+  const types = {} as Partial<Record<JsonValueType, number>>;
   let observed = 0;
-  for (const [type, valueCount] of Object.entries(rawTypes)) {
+  for (const type of Object.keys(rawTypes)) {
     if (!propertyTypeOrder.includes(type as JsonValueType)) {
       invalid(`${path}.types.${type}`, 'a supported coarse property type');
     }
+  }
+  for (const type of propertyTypeOrder) {
+    const valueCount = rawTypes[type];
+    if (valueCount === undefined) continue;
     const parsed = count(valueCount, `${path}.types.${type}`, true);
     types[type as JsonValueType] = parsed;
     observed += parsed;
@@ -166,21 +171,27 @@ function parseEntry(value: unknown, path: string): BaselineFileEntry {
     entry.featureGeometryTypes,
     `${path}.featureGeometryTypes`,
   );
-  const featureGeometryTypes: Partial<Record<GeoJSONGeometryType, number>> = {};
+  const featureGeometryTypes = {} as Partial<
+    Record<GeoJSONGeometryType, number>
+  >;
   let geometryCount = 0;
-  for (const [type, valueCount] of Object.entries(geometry)) {
+  for (const type of Object.keys(geometry)) {
     if (!geometryTypeOrder.includes(type as GeoJSONGeometryType)) {
       invalid(
         `${path}.featureGeometryTypes.${type}`,
         'a GeoJSON geometry type',
       );
     }
+  }
+  for (const type of geometryTypeOrder) {
+    const valueCount = geometry[type];
+    if (valueCount === undefined) continue;
     const parsed = count(
       valueCount,
       `${path}.featureGeometryTypes.${type}`,
       true,
     );
-    featureGeometryTypes[type as GeoJSONGeometryType] = parsed;
+    featureGeometryTypes[type] = parsed;
     geometryCount += parsed;
   }
 
@@ -215,8 +226,8 @@ function parseEntry(value: unknown, path: string): BaselineFileEntry {
   if (ids.missing + ids.string + ids.number !== featureCount) {
     invalid(`${path}.ids`, 'ID counts summing to featureCount');
   }
-  if (ids.duplicates > ids.string + ids.number) {
-    invalid(`${path}.ids.duplicates`, 'at most the present ID count');
+  if (ids.duplicates > Math.max(0, ids.string + ids.number - 1)) {
+    invalid(`${path}.ids.duplicates`, 'at most present ID count minus one');
   }
   const nullGeometries = count(entry.nullGeometries, `${path}.nullGeometries`);
   if (geometryCount + nullGeometries !== featureCount) {

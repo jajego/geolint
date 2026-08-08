@@ -116,14 +116,111 @@ test('baseline parser rejects corrupt and incompatible content', () => {
 });
 
 test('regression identities are stable project-relative paths', () => {
-  assert.equal(
-    normalizeFilePath('C:/repo', 'C:\\repo\\public\\map.geojson'),
-    'public/map.geojson',
-  );
+  const projectRoot = process.platform === 'win32' ? 'C:\\repo' : '/repo';
+  const filePath =
+    process.platform === 'win32'
+      ? 'C:\\repo\\public\\map.geojson'
+      : '/repo/public/map.geojson';
+  assert.equal(normalizeFilePath(projectRoot, filePath), 'public/map.geojson');
   assert.equal(regressionIdentity('public/map.geojson'), 'public/map.geojson');
   assert.throws(
     () => regressionIdentity('../outside.geojson'),
     GeoLintCapabilityError,
   );
   assert.throws(() => regressionIdentity('<memory>'), GeoLintCapabilityError);
+});
+
+test('baseline parser rejects noncanonical persisted file keys', () => {
+  const valid = createBaseline({ 'public/map.geojson': entry() });
+  for (const key of [
+    'public\\map.geojson',
+    'public//map.geojson',
+    'public/./map.geojson',
+    'public/foo/../map.geojson',
+    '../public/map.geojson',
+    'a/../../outside.geojson',
+    '/public/map.geojson',
+    'C:/repo/public/map.geojson',
+    '',
+  ]) {
+    assert.throws(
+      () =>
+        parseBaseline(JSON.stringify({ ...valid, files: { [key]: entry() } })),
+      GeoLintIOError,
+    );
+  }
+  assert.deepEqual(
+    Object.keys(
+      parseBaseline(
+        serializeBaseline(
+          createBaseline({
+            'public/map.geojson': entry(),
+            'public/maps/cities.geojson': entry(),
+            'fixtures/a.geojson': entry(),
+          }),
+        ),
+      ).files,
+    ),
+    ['fixtures/a.geojson', 'public/map.geojson', 'public/maps/cities.geojson'],
+  );
+});
+
+test('baseline parser canonicalizes unordered maps and rejects impossible duplicates', () => {
+  const parsed = parseBaseline(
+    JSON.stringify({
+      schemaVersion: 1,
+      geolintVersion: '1',
+      files: {
+        'z.geojson': entry({
+          featureGeometryTypes: { Polygon: 1, Point: 1 },
+          properties: {
+            z: { present: 2, missing: 0, types: { number: 1, string: 1 } },
+            a: { present: 2, missing: 0, types: { null: 1, boolean: 1 } },
+          },
+        }),
+        'a.geojson': entry(),
+      },
+    }),
+  );
+  assert.deepEqual(Object.keys(parsed.files), ['a.geojson', 'z.geojson']);
+  assert.deepEqual(Object.keys(parsed.files['z.geojson']!.properties), [
+    'a',
+    'z',
+  ]);
+  assert.deepEqual(
+    Object.keys(parsed.files['z.geojson']!.featureGeometryTypes),
+    ['Point', 'Polygon'],
+  );
+  assert.deepEqual(
+    Object.keys(parsed.files['z.geojson']!.properties.a!.types),
+    ['boolean', 'null'],
+  );
+
+  for (const [string, number, duplicates, valid] of [
+    [0, 0, 0, true],
+    [1, 0, 0, true],
+    [1, 1, 1, true],
+    [1, 1, 2, false],
+    [5, 5, 9, true],
+    [5, 5, 10, false],
+  ] as const) {
+    const present = string + number;
+    const candidate = createBaseline({
+      'map.geojson': entry({
+        featureCount: present,
+        totalVertices: present,
+        largestFeatureVertices: present === 0 ? 0 : 1,
+        featureGeometryTypes: present === 0 ? {} : { Point: present },
+        properties: {},
+        ids: { missing: 0, string, number, duplicates },
+      }),
+    });
+    if (valid)
+      assert.doesNotThrow(() => parseBaseline(JSON.stringify(candidate)));
+    else
+      assert.throws(
+        () => parseBaseline(JSON.stringify(candidate)),
+        GeoLintIOError,
+      );
+  }
 });

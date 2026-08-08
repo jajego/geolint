@@ -50,12 +50,14 @@ function report(
   diagnostics: DiagnosticCollector,
   code: string,
   configuredSeverity: Severity,
-  message: string,
-  data: Readonly<Record<string, unknown>>,
+  details: () => {
+    readonly message: string;
+    readonly data: Readonly<Record<string, unknown>>;
+  },
 ): void {
   diagnostics.reportLazy(
     { code, source: 'regression', severity: configuredSeverity },
-    () => ({ message, data }),
+    details,
   );
 }
 
@@ -115,13 +117,10 @@ function addNumericPolicies(
             minimum,
           )
         ) {
-          report(
-            diagnostics,
-            'regression/file-size',
-            'error',
-            'File size increased beyond its approved threshold.',
-            changeData(baseline.bytes, current),
-          );
+          report(diagnostics, 'regression/file-size', 'error', () => ({
+            message: 'File size increased beyond its approved threshold.',
+            data: changeData(baseline.bytes, current),
+          }));
         }
       },
     });
@@ -141,13 +140,10 @@ function addNumericPolicies(
             vertices.minimumIncrease,
           )
         ) {
-          report(
-            diagnostics,
-            'regression/vertex-count',
-            'error',
-            'Vertex count increased beyond its approved threshold.',
-            changeData(baseline.totalVertices, summary.totalVertices),
-          );
+          report(diagnostics, 'regression/vertex-count', 'error', () => ({
+            message: 'Vertex count increased beyond its approved threshold.',
+            data: changeData(baseline.totalVertices, summary.totalVertices),
+          }));
         }
       },
     });
@@ -168,18 +164,15 @@ function addNumericPolicies(
           features.minimumDecrease === undefined ||
           decrease > features.minimumDecrease;
         if (decrease > 0 && percentageExceeded && minimumExceeded) {
-          report(
-            diagnostics,
-            'regression/feature-count',
-            'error',
-            'Feature count decreased beyond its approved threshold.',
-            {
+          report(diagnostics, 'regression/feature-count', 'error', () => ({
+            message: 'Feature count decreased beyond its approved threshold.',
+            data: {
               baseline: baseline.featureCount,
               current: summary.featureCount,
               delta: -decrease,
               percentage: (decrease / baseline.featureCount) * 100,
             },
-          );
+          }));
         }
       },
     });
@@ -234,13 +227,10 @@ function addPropertyPolicies(
             relation(new Set(baselineTypes), new Set(currentTypes)) ===
             direction
           ) {
-            report(
-              diagnostics,
-              code,
-              configured,
-              `Property "${property}" types ${direction}.`,
-              { property, baselineTypes, currentTypes },
-            );
+            report(diagnostics, code, configured, () => ({
+              message: `Property "${property}" types ${direction}.`,
+              data: { property, baselineTypes, currentTypes },
+            }));
           }
         }
       },
@@ -264,13 +254,10 @@ function addPropertyPolicies(
             ? [...currentKeys].filter((key) => !baselineKeys.has(key))
             : [...baselineKeys].filter((key) => !currentKeys.has(key));
         for (const property of keys.sort()) {
-          report(
-            diagnostics,
-            code,
-            configured,
-            `Property "${property}" was ${direction}.`,
-            { property },
-          );
+          report(diagnostics, code, configured, () => ({
+            message: `Property "${property}" was ${direction}.`,
+            data: { property },
+          }));
         }
       },
     });
@@ -306,13 +293,10 @@ function addGeometryPolicies(
             : baselineTypes.has(type) && !currentTypes.has(type),
         );
         for (const geometryType of types) {
-          report(
-            diagnostics,
-            code,
-            configured,
-            `Geometry type "${geometryType}" was ${direction}.`,
-            { geometryType },
-          );
+          report(diagnostics, code, configured, () => ({
+            message: `Geometry type "${geometryType}" was ${direction}.`,
+            data: { geometryType },
+          }));
         }
       },
     });
@@ -341,13 +325,10 @@ function addCountPolicy(
       const oldValue = options.baseline(baseline);
       const newValue = options.current(summary);
       if (newValue > oldValue) {
-        report(
-          diagnostics,
-          options.code,
-          configured,
-          `${options.label} increased from the approved baseline.`,
-          { baseline: oldValue, current: newValue },
-        );
+        report(diagnostics, options.code, configured, () => ({
+          message: `${options.label} increased from the approved baseline.`,
+          data: { baseline: oldValue, current: newValue },
+        }));
       }
     },
   });
