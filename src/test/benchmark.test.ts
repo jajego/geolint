@@ -10,8 +10,7 @@ import type {
 } from '../benchmark/types.js';
 
 function artifact(
-  platform: NodeJS.Platform,
-  result: BenchmarkCaseResult,
+  result: BenchmarkCaseResult = benchmark(100, 10, 100),
 ): BenchmarkArtifact {
   return {
     schemaVersion: 1,
@@ -19,11 +18,11 @@ function artifact(
     suite: 'extended',
     environment: {
       node: 'v22.1.0',
-      platform,
+      platform: 'linux',
       arch: 'x64',
-      cpuModel: 'fixture',
-      logicalCpuCount: 1,
-      totalMemoryBytes: 1,
+      cpuModel: 'AMD  Ryzen  9',
+      logicalCpuCount: 8,
+      totalMemoryBytes: 32_000,
     },
     cases: [result],
   };
@@ -48,7 +47,15 @@ function benchmark(
     maxMs: medianMs,
     megabytesPerSecond,
     peakRssBytes,
+    semanticCounts: { features: 1, vertices: 2 },
   };
+}
+
+function changed(
+  source: BenchmarkArtifact,
+  change: Partial<BenchmarkArtifact['environment']>,
+): BenchmarkArtifact {
+  return { ...source, environment: { ...source.environment, ...change } };
 }
 
 test('benchmark metrics and deterministic fixtures are reproducible', () => {
@@ -63,13 +70,95 @@ test('benchmark metrics and deterministic fixtures are reproducible', () => {
   );
 });
 
-test('benchmark comparison is advisory and warns on unlike environments', () => {
+test('benchmark comparison validates schema and basic artifact structure', () => {
+  const valid = artifact();
+  assert.equal(compareArtifacts(valid, valid).comparisons.length, 3);
+  for (const [value, message] of [
+    [{ ...valid, schemaVersion: undefined }, 'schemaVersion'],
+    [{ ...valid, schemaVersion: 2 }, 'schemaVersion'],
+    [{ ...valid, environment: undefined }, 'environment'],
+    [{ ...valid, cases: [{}] }, 'missing id'],
+  ] as const) {
+    assert.throws(
+      () => compareArtifacts(value as unknown as BenchmarkArtifact, valid),
+      new RegExp(message),
+    );
+  }
+});
+
+test('benchmark environment compatibility uses CPU and Node major', () => {
+  const baseline = artifact();
+  const compatible = changed(baseline, {
+    node: 'v22.14.1',
+    cpuModel: ' AMD Ryzen 9 ',
+  });
+  assert.equal(
+    compareArtifacts(baseline, compatible).compatibleEnvironment,
+    true,
+  );
+  for (const change of [
+    { platform: 'win32' as const },
+    { arch: 'arm64' },
+    { node: 'v24.1.0' },
+    { cpuModel: 'Intel Xeon' },
+  ]) {
+    const comparison = compareArtifacts(baseline, changed(baseline, change));
+    assert.equal(comparison.compatibleEnvironment, false);
+    assert.equal(comparison.comparisons.length, 0);
+  }
+  const warning = compareArtifacts(
+    baseline,
+    changed(baseline, { logicalCpuCount: 4, totalMemoryBytes: 8_000 }),
+  );
+  assert.equal(warning.compatibleEnvironment, true);
+  assert.deepEqual(warning.environmentWarnings, [
+    'logical CPU count differs',
+    'total system memory differs materially',
+  ]);
+});
+
+test('benchmark comparison skips changed workloads and reports unmatched cases', () => {
+  const baseline = artifact();
+  const currentCase = {
+    ...benchmark(125, 7, 130),
+    fixture: 'changed',
+    profile: 'changed',
+    strategy: 'indexed',
+    sourceBytes: 2,
+    semanticCounts: { features: 2, vertices: 3 },
+  };
+  const current = {
+    ...artifact(currentCase),
+    cases: [currentCase, { ...benchmark(1, 1, 1), id: 'added' }],
+  };
+  const comparison = compareArtifacts(baseline, current, 20);
+  assert.equal(comparison.comparisons.length, 0);
+  assert.deepEqual(comparison.addedCases, ['added']);
+  assert.deepEqual(comparison.incompatibleCases, [
+    {
+      id: 'fixture/case',
+      reasons: [
+        'fixture differs',
+        'profile differs',
+        'strategy differs',
+        'sourceBytes differs',
+        'semanticCounts.features differs',
+        'semanticCounts.vertices differs',
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    compareArtifacts(baseline, { ...artifact(), cases: [] }).removedCases,
+    ['fixture/case'],
+  );
+});
+
+test('benchmark comparison remains advisory for compatible workloads', () => {
   const comparison = compareArtifacts(
-    artifact('win32', benchmark(100, 10, 100)),
-    artifact('linux', benchmark(125, 7, 130)),
+    artifact(benchmark(100, 10, 100)),
+    artifact(benchmark(125, 7, 130)),
     20,
   );
-  assert.equal(comparison.compatibleEnvironment, false);
   assert.deepEqual(
     comparison.comparisons.map(({ metric, advisoryRegression }) => [
       metric,

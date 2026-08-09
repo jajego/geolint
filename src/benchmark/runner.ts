@@ -60,7 +60,7 @@ async function measureLintCase(
     });
   await execute();
   const samples: number[] = [];
-  let last = await execute();
+  let last!: Awaited<ReturnType<typeof execute>>;
   for (let index = 0; index < sampleCount(sourceBytes); index += 1) {
     const startedAt = performance.now();
     last = await execute();
@@ -135,13 +135,7 @@ function measureIndexedDetail(fixtureId: FixtureId): BenchmarkCaseResult {
   const fixture = createFixture(fixtureId);
   const sourceBytes = Buffer.byteLength(fixture.source);
   const requirements = createExecutionRequirements({ facts: ['vertexCount'] });
-  const samples: number[] = [];
-  const syntax: number[] = [];
-  const replay: number[] = [];
-  const semantic: number[] = [];
-  let finalIndex = indexedInstrumentation();
-  let finalScan = scanInstrumentation();
-  for (let iteration = 0; iteration < 3; iteration += 1) {
+  const execute = () => {
     const index = indexedInstrumentation();
     const startedAt = performance.now();
     const parsed = parseIndexedSource(fixture.source, requirements, index);
@@ -153,12 +147,6 @@ function measureIndexedDetail(fixtureId: FixtureId): BenchmarkCaseResult {
       instrumentation: scan,
     });
     const semanticMs = performance.now() - semanticStarted;
-    samples.push(performance.now() - startedAt);
-    syntax.push(index.syntaxValidationMs);
-    replay.push(index.initialIndexReplayMs);
-    semantic.push(semanticMs);
-    finalIndex = index;
-    finalScan = scan;
     if (
       summary.totalVertices !== fixture.expectedVertices ||
       scan.positionVisits !== fixture.expectedVertices ||
@@ -166,6 +154,28 @@ function measureIndexedDetail(fixtureId: FixtureId): BenchmarkCaseResult {
     ) {
       throw new Error(`Indexed invariant failed for ${fixture.id}.`);
     }
+    return {
+      elapsedMs: performance.now() - startedAt,
+      index,
+      scan,
+      semanticMs,
+    };
+  };
+  execute();
+  const samples: number[] = [];
+  const syntax: number[] = [];
+  const replay: number[] = [];
+  const semantic: number[] = [];
+  let finalIndex = indexedInstrumentation();
+  let finalScan = scanInstrumentation();
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    const measured = execute();
+    samples.push(measured.elapsedMs);
+    syntax.push(measured.index.syntaxValidationMs);
+    replay.push(measured.index.initialIndexReplayMs);
+    semantic.push(measured.semanticMs);
+    finalIndex = measured.index;
+    finalScan = measured.scan;
   }
   return result(
     {
@@ -198,10 +208,7 @@ function measureBufferedDetail(): BenchmarkCaseResult {
   const fixture = createFixture('points-100k');
   const sourceBytes = Buffer.byteLength(fixture.source);
   const requirements = createExecutionRequirements({ facts: ['vertexCount'] });
-  const samples: number[] = [];
-  const parseSamples: number[] = [];
-  const semanticSamples: number[] = [];
-  for (let iteration = 0; iteration < 5; iteration += 1) {
+  const execute = () => {
     const startedAt = performance.now();
     const parsed = parseBufferedJSON(fixture.source);
     const parsedAt = performance.now();
@@ -214,9 +221,21 @@ function measureBufferedDetail(): BenchmarkCaseResult {
     if (summary.totalVertices !== fixture.expectedVertices) {
       throw new Error('Buffered benchmark invariant failed.');
     }
-    samples.push(finishedAt - startedAt);
-    parseSamples.push(parsedAt - startedAt);
-    semanticSamples.push(finishedAt - parsedAt);
+    return {
+      elapsedMs: finishedAt - startedAt,
+      parseMs: parsedAt - startedAt,
+      semanticMs: finishedAt - parsedAt,
+    };
+  };
+  execute();
+  const samples: number[] = [];
+  const parseSamples: number[] = [];
+  const semanticSamples: number[] = [];
+  for (let iteration = 0; iteration < 5; iteration += 1) {
+    const measured = execute();
+    samples.push(measured.elapsedMs);
+    parseSamples.push(measured.parseMs);
+    semanticSamples.push(measured.semanticMs);
   }
   return result(
     {
@@ -279,9 +298,7 @@ function measureMultiRuleTraversal(): BenchmarkCaseResult {
     featureByteSpans: policy.featureByteSpans,
   });
   const value = JSON.parse(fixture.source);
-  const samples: number[] = [];
-  let finalInstrumentation = scanInstrumentation();
-  for (let iteration = 0; iteration < 5; iteration += 1) {
+  const execute = () => {
     callbacks = 0;
     const instrumentation = scanInstrumentation();
     const startedAt = performance.now();
@@ -294,8 +311,6 @@ function measureMultiRuleTraversal(): BenchmarkCaseResult {
         ? { coordinateObservation: policy.coordinateObservation }
         : {}),
     });
-    samples.push(performance.now() - startedAt);
-    finalInstrumentation = instrumentation;
     if (
       callbacks !== fixture.expectedVertices * 3 ||
       instrumentation.coordinateTraversals !== 1 ||
@@ -303,6 +318,19 @@ function measureMultiRuleTraversal(): BenchmarkCaseResult {
     ) {
       throw new Error('Multi-rule traversal invariant failed.');
     }
+    return {
+      elapsedMs: performance.now() - startedAt,
+      instrumentation,
+      callbacks,
+    };
+  };
+  execute();
+  const samples: number[] = [];
+  let finalInstrumentation = scanInstrumentation();
+  for (let iteration = 0; iteration < 5; iteration += 1) {
+    const measured = execute();
+    samples.push(measured.elapsedMs);
+    finalInstrumentation = measured.instrumentation;
   }
   return result(
     {
@@ -450,7 +478,7 @@ async function measureBatch(
     const execute = () => lintFiles({ cwd: directory, targets, config });
     await execute();
     const samples: number[] = [];
-    let last = await execute();
+    let last!: Awaited<ReturnType<typeof execute>>;
     for (let index = 0; index < 3; index += 1) {
       const startedAt = performance.now();
       last = await execute();

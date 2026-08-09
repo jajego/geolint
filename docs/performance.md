@@ -15,7 +15,7 @@ The standard suite is the normal development and CI check. The extended suite ad
 
 ## Methodology
 
-Fixtures are deterministic and generated before timed regions. Member-order randomization uses a fixed seed. Warm in-process cases run one warmup, retain every measured sample, and report the median; inputs of at least 5 MB use three samples and smaller inputs use five. Fixture byte counts are computed before timing.
+Fixtures are deterministic and generated before timed regions. Member-order randomization uses a fixed seed. Every warm in-process case, including indexed detail, buffered detail, and multi-rule traversal instrumentation, runs one complete discarded warmup before fresh per-sample instrumentation is collected. Inputs of at least 5 MB use three measured samples and smaller inputs use five; the median is primary. Fixture byte counts are computed before timing.
 
 Cold-start cases launch a fresh built CLI process for each of five samples. They separately measure `--version`, `--help`, and a small clean JSON lint. They are not compared with warm engine throughput.
 
@@ -46,7 +46,7 @@ Benchmark artifacts use schema version 1 independently of package semver:
 
 Each case records its stable ID, group, fixture, policy profile, parser strategy, source bytes, raw timing samples, median/min/max, applicable throughput, semantic counts, optional instrumentation, and optional peak RSS.
 
-The comparison command matches stable case IDs and reports wall-clock, throughput, and peak-RSS deltas. Its default 20% threshold is explicit and advisory. It warns when OS, architecture, or Node major version differs and never fails normal CI solely for timing variance.
+The comparison command validates schema version 1 and the required artifact, environment, and case fields before comparison. It matches stable case IDs only when fixture, profile, strategy, source bytes, and present semantic counts also match. Added, removed, and changed cases are listed without timing deltas. Timing comparison requires matching platform, architecture, Node major version, and CPU model (with whitespace normalized); logical CPU-count differences and material system-memory differences are warnings. Its default 20% threshold is explicit and advisory, and it never fails normal CI solely for timing variance.
 
 ## Fixtures and profiles
 
@@ -102,6 +102,6 @@ No indexed-parser, scanner, rule-dispatch, diagnostic, or planner optimization w
 
 ## Caveats and policy
 
-Timing varies with CPU frequency, background work, Node/V8 version, operating system, and GC history. Compare artifacts from the same OS, architecture, Node major version, and preferably the same runner. Initial thresholds are advisory until CI variance is characterized. Correctness and instrumentation invariants remain hard failures.
+Timing varies with CPU frequency, background work, Node/V8 version, operating system, and GC history. Compare artifacts from the same platform, architecture, Node major version, and CPU model; CPU-count and memory warnings provide additional runner context. Initial thresholds are advisory until CI variance is characterized. Correctness and instrumentation invariants remain hard failures.
 
 Workers, worker-pool heuristics, cross-process caches, stdin spooling, parser rewrites, and hard timing gates are deferred to their designated later phases.
