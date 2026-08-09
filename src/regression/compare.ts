@@ -1,5 +1,5 @@
 import { parseByteSize } from '../engine/byte-size.js';
-import { DiagnosticCollector } from '../engine/diagnostics.js';
+import type { DiagnosticCollector } from '../engine/diagnostics.js';
 import { GeoLintCapabilityError } from '../engine/errors.js';
 import { skipPolicyForIncompleteFacts } from '../engine/requirements.js';
 import type { RegressionConfig, RegressionSeverity } from '../types/config.js';
@@ -9,11 +9,8 @@ import type {
   SkippedPolicy,
   SummaryFactName,
 } from '../types/semantic.js';
-import {
-  geometryTypeOrder,
-  propertyTypeOrder,
-  type BaselineFileEntry,
-} from './schema.js';
+import { geometryTypeOrder, propertyTypeOrder } from './schema.js';
+import type { BaselineFileEntry } from './schema.js';
 
 type Severity = 'warning' | 'error';
 type InputKind = 'object' | 'text';

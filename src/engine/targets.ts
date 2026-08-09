@@ -29,11 +29,9 @@ async function explicitPathKind(
     if (entry.isSymbolicLink()) {
       return (await stat(path)).isFile() ? 'file' : undefined;
     }
-    return entry.isFile()
-      ? 'file'
-      : entry.isDirectory()
-        ? 'directory'
-        : undefined;
+    if (entry.isFile()) return 'file';
+    if (entry.isDirectory()) return 'directory';
+    return undefined;
   } catch {
     return undefined;
   }
@@ -208,13 +206,11 @@ export async function resolveTargets(
         : baseFileConfig(config, filePath),
     });
   }
-  resolved.sort((left, right) =>
-    left.filePath < right.filePath
-      ? -1
-      : left.filePath > right.filePath
-        ? 1
-        : 0,
-  );
+  resolved.sort((left, right) => {
+    if (left.filePath < right.filePath) return -1;
+    if (left.filePath > right.filePath) return 1;
+    return 0;
+  });
   if (resolved.length === 0 && !explicit) {
     throw new GeoLintTargetError(
       'No files matched config.files after ignores.',

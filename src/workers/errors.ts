@@ -1,13 +1,13 @@
 import {
   GeoLintCapabilityError,
   GeoLintConfigError,
-  GeoLintError,
   GeoLintIOError,
   GeoLintInputError,
   GeoLintInternalError,
   GeoLintPluginError,
   GeoLintTargetError,
 } from '../engine/errors.js';
+import type { GeoLintError } from '../engine/errors.js';
 import type { WorkerErrorEnvelope } from './protocol.js';
 
 type GeoLintErrorConstructor = new (

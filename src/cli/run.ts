@@ -23,7 +23,7 @@ export interface CliOutput {
   readonly stderr: string;
 }
 
-export const help = `Usage: geolint [targets...]
+const help = `Usage: geolint [targets...]
        geolint snapshot [targets...]
        geolint --print-config <file>
 

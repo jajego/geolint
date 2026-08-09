@@ -28,7 +28,7 @@ import type {
   SkippedPolicy,
   SummaryFactName,
 } from '../types/semantic.js';
-import { DiagnosticCollector } from './diagnostics.js';
+import type { DiagnosticCollector } from './diagnostics.js';
 import { parseByteSize } from './byte-size.js';
 import {
   GeoLintCapabilityError,
@@ -854,52 +854,53 @@ export function compilePolicy(
   );
   for (const fact of regression.facts) facts.add(fact);
   const listener = composite(listeners);
-  const coordinateObservation: CoordinateObservation | undefined =
-    coordinateObservations.length === 0
-      ? undefined
-      : coordinateObservations.length === 1
-        ? coordinateObservations[0]
-        : (values, featureIndex, parentPath, positionIndex) => {
-            for (const observe of coordinateObservations) {
-              observe(values, featureIndex, parentPath, positionIndex);
-            }
-          };
-  const featureIdObservation: FeatureIdObservation | undefined =
-    featureIdObservations.length === 0
-      ? undefined
-      : featureIdObservations.length === 1
-        ? featureIdObservations[0]
-        : (index, path, status, id) => {
-            for (const observe of featureIdObservations) {
-              observe(index, path, status, id);
-            }
-          };
-  const coordinateLexemeObservation: CoordinateLexemeObservation | undefined =
-    coordinateLexemeObservations.length === 0
-      ? undefined
-      : coordinateLexemeObservations.length === 1
-        ? coordinateLexemeObservations[0]
-        : (rawValues, featureIndex, parentPath, positionIndex, byteOffset) => {
-            for (const observe of coordinateLexemeObservations) {
-              observe(
-                rawValues,
-                featureIndex,
-                parentPath,
-                positionIndex,
-                byteOffset,
-              );
-            }
-          };
-  const featureByteObservation: FeatureByteObservation | undefined =
-    featureByteObservations.length === 0
-      ? undefined
-      : featureByteObservations.length === 1
-        ? featureByteObservations[0]
-        : (index, path, bytes, byteOffset, id) => {
-            for (const observe of featureByteObservations) {
-              observe(index, path, bytes, byteOffset, id);
-            }
-          };
+  let coordinateObservation: CoordinateObservation | undefined;
+  if (coordinateObservations.length === 1)
+    coordinateObservation = coordinateObservations[0];
+  else if (coordinateObservations.length > 1) {
+    coordinateObservation = (
+      values,
+      featureIndex,
+      parentPath,
+      positionIndex,
+    ) => {
+      for (const observe of coordinateObservations)
+        observe(values, featureIndex, parentPath, positionIndex);
+    };
+  }
+  let featureIdObservation: FeatureIdObservation | undefined;
+  if (featureIdObservations.length === 1)
+    featureIdObservation = featureIdObservations[0];
+  else if (featureIdObservations.length > 1) {
+    featureIdObservation = (index, path, status, id) => {
+      for (const observe of featureIdObservations)
+        observe(index, path, status, id);
+    };
+  }
+  let coordinateLexemeObservation: CoordinateLexemeObservation | undefined;
+  if (coordinateLexemeObservations.length === 1)
+    coordinateLexemeObservation = coordinateLexemeObservations[0];
+  else if (coordinateLexemeObservations.length > 1) {
+    coordinateLexemeObservation = (
+      rawValues,
+      featureIndex,
+      parentPath,
+      positionIndex,
+      byteOffset,
+    ) => {
+      for (const observe of coordinateLexemeObservations)
+        observe(rawValues, featureIndex, parentPath, positionIndex, byteOffset);
+    };
+  }
+  let featureByteObservation: FeatureByteObservation | undefined;
+  if (featureByteObservations.length === 1)
+    featureByteObservation = featureByteObservations[0];
+  else if (featureByteObservations.length > 1) {
+    featureByteObservation = (index, path, bytes, byteOffset, id) => {
+      for (const observe of featureByteObservations)
+        observe(index, path, bytes, byteOffset, id);
+    };
+  }
   return {
     ...(listener ? { listener } : {}),
     ...(coordinateObservation ? { coordinateObservation } : {}),

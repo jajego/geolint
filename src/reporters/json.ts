@@ -28,13 +28,11 @@ function project(value: unknown, seen: Set<object>): unknown {
         throw new TypeError('GeoLint JSON output requires string Map keys.');
       }
       const output = Object.create(null) as Record<string, unknown>;
-      for (const [key, entry] of entries.sort(([left], [right]) =>
-        String(left) < String(right)
-          ? -1
-          : String(left) > String(right)
-            ? 1
-            : 0,
-      )) {
+      for (const [key, entry] of entries.sort(([left], [right]) => {
+        if (String(left) < String(right)) return -1;
+        if (String(left) > String(right)) return 1;
+        return 0;
+      })) {
         output[key] = project(entry, seen);
       }
       return output;

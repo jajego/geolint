@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/workers/worker-entry.ts",
+    "src/benchmark/compare-cli.ts",
+    "src/benchmark/index.ts",
+    "src/benchmark/worker-feasibility.ts",
+    "src/benchmark/worker-prototype-entry.ts",
+    "src/benchmark/worker-snapshot.ts",
+    "src/test/**/*.test.ts"
+  ],
+  "project": ["src/**/*.ts"]
+}

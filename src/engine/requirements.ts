@@ -98,8 +98,6 @@ export function createExecutionRequirements(
   });
 }
 
-export const noExecutionRequirements = createExecutionRequirements();
-
 export function skipPolicyForIncompleteFacts(options: {
   readonly code: string;
   readonly source: 'rule' | 'budget' | 'regression';

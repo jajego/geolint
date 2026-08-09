@@ -4,7 +4,7 @@ import { posix } from 'node:path';
 import { GeoLintIOError } from '../engine/errors.js';
 import type { GeoJSONGeometryType, JsonValueType } from '../types/semantic.js';
 
-export const baselineSchemaVersion = 1 as const;
+const baselineSchemaVersion = 1 as const;
 export const geometryTypeOrder = Object.freeze([
   'Point',
   'MultiPoint',
@@ -29,7 +29,7 @@ const packageVersion = (
   createRequire(import.meta.url)('../../package.json') as { version: string }
 ).version;
 
-export interface BaselinePropertyEntry {
+interface BaselinePropertyEntry {
   readonly present: number;
   readonly missing: number;
   readonly types: Readonly<Partial<Record<JsonValueType, number>>>;

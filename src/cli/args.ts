@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-export type CliFormat = 'pretty' | 'json';
+type CliFormat = 'pretty' | 'json';
 
 export interface CliArguments {
   readonly command: 'lint' | 'snapshot' | 'print-config' | 'help' | 'version';
@@ -73,15 +73,11 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
     if (!Number.isSafeInteger(workers))
       invalid('--workers must be a positive safe integer.');
   }
-  const command = values.help
-    ? 'help'
-    : values.version
-      ? 'version'
-      : values['print-config']
-        ? 'print-config'
-        : positionals[0] === 'snapshot'
-          ? 'snapshot'
-          : 'lint';
+  let command: CliArguments['command'] =
+    positionals[0] === 'snapshot' ? 'snapshot' : 'lint';
+  if (values['print-config']) command = 'print-config';
+  if (values.version) command = 'version';
+  if (values.help) command = 'help';
   const targets = command === 'snapshot' ? positionals.slice(1) : positionals;
   if (command === 'print-config' && positionals.length > 0) {
     invalid('--print-config cannot be combined with positional targets.');

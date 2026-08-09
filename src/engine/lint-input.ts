@@ -145,7 +145,7 @@ async function regressionBaseline(
   return baseline.files[identity];
 }
 
-export function lintResolvedText(
+function lintResolvedText(
   text: string,
   options: ResolvedSourceOptions,
 ): FileLintResult {

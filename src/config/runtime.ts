@@ -19,17 +19,14 @@ export async function resolveRuntimeConfig(
 ): Promise<ResolvedConfig> {
   const cwd = resolve(options.cwd ?? process.cwd());
   const supplied = options.config;
-  const path =
-    typeof supplied === 'string'
-      ? resolve(cwd, supplied)
-      : options.noConfig
-        ? undefined
-        : await discoverConfig(cwd);
-  const config: GeoLintConfig =
-    typeof supplied === 'object'
-      ? await resolveConfigExtends(supplied, cwd)
-      : path
-        ? await loadConfigWithExtends(path)
-        : await resolveConfigExtends(getPreset('geolint/recommended')!, cwd);
+  let path: string | undefined;
+  if (typeof supplied === 'string') path = resolve(cwd, supplied);
+  else if (!options.noConfig) path = await discoverConfig(cwd);
+  let config: GeoLintConfig;
+  if (typeof supplied === 'object')
+    config = await resolveConfigExtends(supplied, cwd);
+  else if (path) config = await loadConfigWithExtends(path);
+  else
+    config = await resolveConfigExtends(getPreset('geolint/recommended')!, cwd);
   return resolveConfig(config, path ? dirname(path) : cwd);
 }

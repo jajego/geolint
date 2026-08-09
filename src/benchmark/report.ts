@@ -21,7 +21,7 @@ const groupOrder: readonly BenchmarkGroup[] = [
   'memory',
 ];
 
-export function benchmarkEnvironment(): BenchmarkEnvironment {
+function benchmarkEnvironment(): BenchmarkEnvironment {
   const processors = cpus();
   return {
     node: process.version,

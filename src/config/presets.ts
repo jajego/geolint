@@ -21,9 +21,7 @@ const web: GeoLintConfig = Object.freeze({
 });
 
 export function getPreset(reference: string): GeoLintConfig | undefined {
-  return reference === 'geolint/recommended'
-    ? recommended
-    : reference === 'geolint/web'
-      ? web
-      : undefined;
+  if (reference === 'geolint/recommended') return recommended;
+  if (reference === 'geolint/web') return web;
+  return undefined;
 }

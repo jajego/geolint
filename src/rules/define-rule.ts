@@ -3,7 +3,6 @@ import type {
   FileSummary,
   FileCompleteness,
   SummaryFactName,
-  Diagnostic,
   JsonPointer,
 } from '../types/semantic.js';
 import type { InferRuleOptions, RuleOptionsSchema } from './option-schema.js';
@@ -133,8 +132,3 @@ export function validateRuleListener(
     );
   }
 }
-
-export type CompiledRuleSeverity = Extract<
-  Diagnostic['severity'],
-  'warning' | 'error'
->;

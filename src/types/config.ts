@@ -1,9 +1,9 @@
 import type { GeoLintPlugin } from '../plugins/plugin.js';
 
-export type Severity = 'off' | 'warn' | 'error';
+type Severity = 'off' | 'warn' | 'error';
 export type RuleSetting =
   Severity | readonly [Exclude<Severity, 'off'>, unknown?];
-export type RuleConfigMap = Readonly<Record<string, RuleSetting>>;
+type RuleConfigMap = Readonly<Record<string, RuleSetting>>;
 export type BudgetSeverity = 'warn' | 'error';
 export type BudgetSetting<T> =
   | T

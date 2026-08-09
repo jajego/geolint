@@ -12,7 +12,7 @@ function isConfig(value: unknown): value is GeoLintConfig {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export async function loadConfig(path: string): Promise<GeoLintConfig> {
+async function loadConfig(path: string): Promise<GeoLintConfig> {
   const absolutePath = resolve(path);
   try {
     const imported: unknown =
