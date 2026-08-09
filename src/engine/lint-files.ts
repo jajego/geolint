@@ -142,11 +142,18 @@ function serializedPolicy(target: ResolvedTarget): SerializedResolvedPolicy {
   };
 }
 
+interface WorkerDecision {
+  readonly available: number;
+  readonly files: number;
+  readonly mode: string;
+  readonly count: number;
+  readonly reason: string;
+}
+
 async function workerDecision(
   targets: readonly ResolvedTarget[],
   requested: number | undefined,
-  debug?: (message: string) => void,
-): Promise<number> {
+): Promise<WorkerDecision> {
   const available = availableParallelism();
   const files = targets.filter((target) => target.kind === 'file');
   const mode = requested === undefined ? 'auto' : String(requested);
@@ -183,24 +190,26 @@ async function workerDecision(
       reason = 'large multi-file workload';
     }
   }
-  debug?.(`worker mode: ${mode}`);
-  debug?.(`available parallelism: ${available}`);
-  debug?.(`eligible files: ${files.length}`);
-  debug?.(`effective workers: ${effective}`);
-  debug?.(`worker reason: ${reason}`);
-  return effective;
+  return { available, files: files.length, mode, count: effective, reason };
 }
 
-async function executeWorkers(
+function debugWorkerDecision(
+  decision: WorkerDecision,
+  debug: ((message: string) => void) | undefined,
+): void {
+  debug?.(`worker mode: ${decision.mode}`);
+  debug?.(`available parallelism: ${decision.available}`);
+  debug?.(`eligible files: ${decision.files}`);
+  debug?.(`effective workers: ${decision.count}`);
+  debug?.(`worker reason: ${decision.reason}`);
+}
+
+function workerTasks(
   targets: readonly ResolvedTarget[],
   parser: ParserStrategy,
   baseline: BaselineV1 | undefined,
-  workerCount: number,
-): Promise<{
-  files: readonly FileLintResult[];
-  errors: readonly GeoLintError[];
-}> {
-  const tasks = targets.map((target, taskId): WorkerLintTask => {
+): readonly WorkerLintTask[] {
+  return targets.map((target, taskId): WorkerLintTask => {
     if (target.kind !== 'file')
       throw new GeoLintInternalError(
         'Stdin cannot be dispatched to a Worker.',
@@ -225,6 +234,24 @@ async function executeWorkers(
       ...(options.baseline ? { baseline: options.baseline } : {}),
     };
   });
+}
+
+function cloneable(tasks: readonly WorkerLintTask[]): boolean {
+  try {
+    for (const task of tasks) structuredClone(task);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function executeWorkers(
+  tasks: readonly WorkerLintTask[],
+  workerCount: number,
+): Promise<{
+  files: readonly FileLintResult[];
+  errors: readonly GeoLintError[];
+}> {
   let pool: WorkerPool;
   try {
     pool = await WorkerPool.create(workerCount);
@@ -286,21 +313,32 @@ export async function executeLintFiles(
 
   const files: FileLintResult[] = [];
   const errors: GeoLintError[] = [];
-  const workerCount = await workerDecision(
-    targets,
-    options.workers,
-    options.debug,
-  );
-  if (workerCount > 1) {
-    const parallel = await executeWorkers(
-      targets,
-      parser,
-      baseline,
-      workerCount,
-    );
-    files.push(...parallel.files);
-    errors.push(...parallel.errors);
-  } else {
+  let decision = await workerDecision(targets, options.workers);
+  if (decision.count > 1) {
+    const tasks = workerTasks(targets, parser, baseline);
+    if (!cloneable(tasks)) {
+      if (options.workers && options.workers > 1)
+        throw new GeoLintCapabilityError(
+          'Worker task is not structured-clone-safe.',
+          'GEOLINT_CAPABILITY_WORKER_TASK_NOT_CLONEABLE',
+        );
+      decision = {
+        ...decision,
+        count: 1,
+        reason: 'resolved task not structured-clone-safe',
+      };
+      options.debug?.(
+        'Worker parallelism disabled because the resolved worker task is not structured-clone-safe.',
+      );
+    } else {
+      debugWorkerDecision(decision, options.debug);
+      const parallel = await executeWorkers(tasks, decision.count);
+      files.push(...parallel.files);
+      errors.push(...parallel.errors);
+    }
+  }
+  if (decision.count <= 1) {
+    debugWorkerDecision(decision, options.debug);
     let stdinBytes = options.stdinBytes;
     for (const target of targets) {
       try {

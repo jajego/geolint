@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
 
 import { resolveTargets } from '../cli/targets.js';
@@ -69,6 +70,14 @@ export interface SnapshotOptions extends ConfigRuntimeOptions {
   readonly baselinePath?: string;
   readonly noIgnore?: boolean;
   readonly workers?: number;
+}
+
+export function snapshotWorkerCount(
+  requestedWorkers: number | undefined,
+  targetCount: number,
+  parallelism = availableParallelism(),
+): number {
+  return Math.min(requestedWorkers ?? 1, parallelism, targetCount);
 }
 
 function complete(summary: FileSummary): boolean {
@@ -243,7 +252,7 @@ export async function snapshotBaseline(
     : resolveBaselinePath(config);
   const before = await loadBaseline(baselinePath);
   const captured = Object.create(null) as Record<string, BaselineFileEntry>;
-  const workerCount = Math.min(options.workers ?? 1, targets.length);
+  const workerCount = snapshotWorkerCount(options.workers, targets.length);
   if (workerCount > 1) {
     const tasks = targets.map((target, taskId): WorkerSnapshotTask => ({
       protocolVersion: 1,

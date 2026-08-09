@@ -6,10 +6,27 @@ import type {
   WorkerTaskOutcome,
 } from './protocol.js';
 
+export interface WorkerLike {
+  on(event: 'message', listener: (message: WorkerResponse) => void): unknown;
+  once(event: 'error', listener: (error: Error) => void): unknown;
+  once(event: 'exit', listener: (code: number) => void): unknown;
+  off(event: 'message', listener: (message: WorkerResponse) => void): unknown;
+  off(event: 'error', listener: (error: Error) => void): unknown;
+  off(event: 'exit', listener: (code: number) => void): unknown;
+  removeAllListeners(event?: string): unknown;
+  postMessage(value: WorkerTask): void;
+  terminate(): Promise<number>;
+}
+
 interface Slot {
-  worker: Worker;
+  worker: WorkerLike;
   active: WorkerTask | undefined;
   failed: boolean;
+  replacing: boolean;
+}
+
+export interface WorkerPoolOptions {
+  readonly createWorker?: () => WorkerLike;
 }
 
 function internalError(task: WorkerTask, message: string): WorkerTaskOutcome {
@@ -26,13 +43,23 @@ function internalError(task: WorkerTask, message: string): WorkerTaskOutcome {
   };
 }
 
-function readyWorker(): Promise<Worker> {
+function createNativeWorker(): Worker {
   const worker = new Worker(new URL('./worker-entry.js', import.meta.url), {
     stdout: true,
     stderr: true,
   });
   worker.stdout.resume();
   worker.stderr.resume();
+  return worker;
+}
+
+function readyWorker(createWorker: () => WorkerLike): Promise<WorkerLike> {
+  let worker: WorkerLike;
+  try {
+    worker = createWorker();
+  } catch (error) {
+    return Promise.reject(error);
+  }
   return new Promise((resolve, reject) => {
     const cleanup = () => {
       worker.off('message', ready);
@@ -62,20 +89,33 @@ function readyWorker(): Promise<Worker> {
 
 export class WorkerPool {
   readonly #slots: Slot[] = [];
+  readonly #createWorker: () => WorkerLike;
   firstTaskMs = 0;
 
-  private constructor() {}
+  private constructor(createWorker: () => WorkerLike) {
+    this.#createWorker = createWorker;
+  }
 
-  static async create(size: number): Promise<WorkerPool> {
-    const pool = new WorkerPool();
+  static async create(
+    size: number,
+    options: WorkerPoolOptions = {},
+  ): Promise<WorkerPool> {
+    const pool = new WorkerPool(options.createWorker ?? createNativeWorker);
     try {
       const started = await Promise.allSettled(
-        Array.from({ length: size }, () => readyWorker()),
+        Array.from({ length: size }, () => readyWorker(pool.#createWorker)),
       );
       pool.#slots.push(
         ...started.flatMap((result) =>
           result.status === 'fulfilled'
-            ? [{ worker: result.value, active: undefined, failed: false }]
+            ? [
+                {
+                  worker: result.value,
+                  active: undefined,
+                  failed: false,
+                  replacing: false,
+                },
+              ]
             : [],
         ),
       );
@@ -122,30 +162,48 @@ export class WorkerPool {
         next += 1;
         if (!task) return;
         slot.active = task;
-        slot.worker.postMessage(task);
+        try {
+          slot.worker.postMessage(task);
+        } catch (error) {
+          slot.active = undefined;
+          complete(
+            internalError(
+              task,
+              `Could not dispatch Worker task: ${String(error)}`,
+            ),
+          );
+          dispatch(slot);
+        }
+      };
+      const failPendingIfUnusable = () => {
+        if (
+          finished ||
+          next >= tasks.length ||
+          this.#slots.some((slot) => !slot.failed || slot.replacing)
+        )
+          return;
+        while (next < tasks.length) {
+          complete(
+            internalError(tasks[next++]!, 'No GeoLint Workers are available.'),
+          );
+        }
       };
       const replace = async (slot: Slot) => {
         if (finished || next >= tasks.length) return;
         try {
-          const worker = await readyWorker();
+          const worker = await readyWorker(this.#createWorker);
           if (finished || next >= tasks.length) {
             await worker.terminate();
             return;
           }
           slot.worker = worker;
           slot.failed = false;
+          slot.replacing = false;
           attach(slot);
           dispatch(slot);
-        } catch (error) {
-          while (next < tasks.length) {
-            const task = tasks[next++]!;
-            complete(
-              internalError(
-                task,
-                `Worker replacement failed: ${String(error)}`,
-              ),
-            );
-          }
+        } catch {
+          slot.replacing = false;
+          failPendingIfUnusable();
         }
       };
       const crash = (slot: Slot, message: string) => {
@@ -153,6 +211,7 @@ export class WorkerPool {
         slot.failed = true;
         if (slot.active) complete(internalError(slot.active, message));
         slot.active = undefined;
+        slot.replacing = true;
         void replace(slot);
       };
       const attach = (slot: Slot) => {

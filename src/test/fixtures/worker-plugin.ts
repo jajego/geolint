@@ -53,7 +53,21 @@ const propertyHook = defineRule({
 const throwing = defineRule({
   meta: { name: 'throwing', schema: null },
   create() {
-    throw new Error('worker plugin failed');
+    explodeInsideWorkerPlugin();
+  },
+});
+
+function explodeInsideWorkerPlugin(): never {
+  throw new Error('worker plugin failed');
+}
+
+const cloneOptions = defineRule({
+  meta: {
+    name: 'clone-options',
+    schema: { parse: (value: unknown) => value },
+  },
+  create() {
+    return {};
   },
 });
 
@@ -84,6 +98,7 @@ export default definePlugin({
     'isolated-coordinates': isolatedCoordinates,
     'property-hook': propertyHook,
     throwing,
+    'clone-options': cloneOptions,
     crashing,
     noisy,
   },

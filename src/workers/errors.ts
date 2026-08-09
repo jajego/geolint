@@ -15,13 +15,15 @@ export function deserializeWorkerError(
 ): GeoLintError {
   const options = error.cause ? { cause: new Error(error.cause) } : undefined;
   if (error.name === 'GeoLintPluginError' && error.ruleId && error.filePath) {
-    return new GeoLintPluginError(
+    const value = new GeoLintPluginError(
       error.message,
       'GEOLINT_PLUGIN_ERROR',
       error.ruleId,
       error.filePath,
       { cause: options?.cause },
     );
+    if (error.stack) value.stack = error.stack;
+    return value;
   }
   const ErrorClass =
     error.name === 'GeoLintCapabilityError'

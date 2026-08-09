@@ -126,13 +126,16 @@ function pluginFailure(
   filePath: string,
   cause: unknown,
 ): GeoLintPluginError {
-  return new GeoLintPluginError(
+  const error = new GeoLintPluginError(
     `Plugin rule "${ruleId}" failed while linting ${filePath}.`,
     'GEOLINT_PLUGIN_ERROR',
     ruleId,
     filePath,
     { cause },
   );
+  if (cause instanceof Error && cause.stack)
+    error.stack = `${error.stack}\nCaused by: ${cause.stack}`;
+  return error;
 }
 
 function isPluginThenable(

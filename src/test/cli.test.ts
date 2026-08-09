@@ -127,6 +127,48 @@ export default {
   }
 });
 
+test('built CLI rejects uncloneable explicit worker tasks without JSON stdout', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geolint-cli-worker-clone-'));
+  const pluginUrl = new URL('./fixtures/worker-plugin.js', import.meta.url)
+    .href;
+  try {
+    await Promise.all(
+      ['a.geojson', 'b.geojson'].map((name) =>
+        writeFile(
+          join(root, name),
+          JSON.stringify({ type: 'Feature', properties: {}, geometry: null }),
+        ),
+      ),
+    );
+    await writeFile(
+      join(root, 'geolint.config.mjs'),
+      `import plugin from ${JSON.stringify(pluginUrl)};
+export default {
+  plugins: { worker: plugin },
+  rules: { 'worker/clone-options': ['error', { callback: () => {} }] },
+};
+`,
+    );
+    const result = runResult(
+      [
+        '--config',
+        'geolint.config.mjs',
+        '--workers',
+        '2',
+        '--format',
+        'json',
+        '*.geojson',
+      ],
+      { cwd: root },
+    );
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /GEOLINT_CAPABILITY_WORKER_TASK_NOT_CLONEABLE/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('no-config pretty and JSON flows lint the actual built CLI', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geolint-cli-product-'));
   try {
