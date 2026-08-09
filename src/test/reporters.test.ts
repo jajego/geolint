@@ -87,7 +87,19 @@ test('pretty reporter shows codes, suppression, skips, and summary facts', async
   assert.match(output, /additional occurrences suppressed/);
   assert.match(output, /consistent-property-types · incomplete propertyStats/);
   assert.match(output, /3 features/);
+  assert.match(output, /3 vertices/);
   assert.equal(output.includes('\u001b['), false);
+});
+
+test('pretty reporter pluralizes vertices', async () => {
+  const file = await lintGeoJSON(
+    { type: 'Point', coordinates: [0, 0] },
+    { filename: 'point.geojson' },
+  );
+  const output = formatPretty(createLintResult([file], 0));
+
+  assert.match(output, /1 vertex/);
+  assert.doesNotMatch(output, /vertexs/);
 });
 
 test('JSON reporter preserves hostile own keys without mutating prototypes', () => {

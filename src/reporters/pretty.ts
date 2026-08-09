@@ -65,7 +65,7 @@ function fileLines(file: FileLintResult, color: boolean): string[] {
   if (file.summary) {
     const facts = [
       plural(file.summary.featureCount, 'feature'),
-      plural(file.summary.totalVertices, 'vertex'),
+      plural(file.summary.totalVertices, 'vertex', 'vertices'),
       ...(file.summary.bytes === undefined ? [] : [bytes(file.summary.bytes)]),
       `${Math.round(file.durationMs)} ms`,
     ];
