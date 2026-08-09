@@ -1,3 +1,5 @@
+import type { GeoLintPlugin } from '../plugins/plugin.js';
+
 export type Severity = 'off' | 'warn' | 'error';
 export type RuleSetting =
   Severity | readonly [Exclude<Severity, 'off'>, unknown?];
@@ -85,7 +87,7 @@ export interface GeoLintConfig {
   extends?: readonly string[];
   files?: readonly string[];
   ignores?: readonly string[];
-  plugins?: Readonly<Record<string, unknown>>;
+  plugins?: Readonly<Record<string, GeoLintPlugin>>;
   rules?: RuleConfigMap;
   budgets?: BudgetConfig;
   regression?: RegressionConfig;
@@ -93,11 +95,16 @@ export interface GeoLintConfig {
   overrides?: readonly GeoLintOverride[];
 }
 
+export type GeoLintConfigFragment = Pick<
+  GeoLintConfig,
+  'rules' | 'budgets' | 'regression' | 'diagnostics'
+>;
+
 export interface ResolvedConfig {
   readonly projectRoot: string;
   readonly files?: readonly string[];
   readonly ignores?: readonly string[];
-  readonly plugins: Readonly<Record<string, unknown>>;
+  readonly plugins: Readonly<Record<string, GeoLintPlugin>>;
   readonly rules: RuleConfigMap;
   readonly budgets: BudgetConfig;
   readonly regression: RegressionConfig;

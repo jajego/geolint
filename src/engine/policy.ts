@@ -15,6 +15,7 @@ import type {
   RuleListener,
 } from '../rules/define-rule.js';
 import type { RuleOptionsSchema } from '../rules/option-schema.js';
+import type { GeoLintPlugin } from '../plugins/plugin.js';
 import type {
   BudgetConfig,
   BudgetSeverity,
@@ -54,6 +55,12 @@ interface ErasedRule {
   ) => RuleListener<readonly SummaryFactName[]>;
 }
 
+interface RegistryRule {
+  readonly id: string;
+  readonly rule: ErasedRule;
+  readonly plugin: boolean;
+}
+
 interface AggregatePolicy {
   readonly code: string;
   readonly source: 'rule' | 'budget';
@@ -75,9 +82,144 @@ export interface CompiledPolicy {
   finish(summary: FileSummary): readonly SkippedPolicy[];
 }
 
-const ruleRegistry = new Map<string, ErasedRule>(
-  builtInRules.map((rule) => [rule.meta.name, rule as unknown as ErasedRule]),
+const builtInRegistry = Object.freeze(
+  builtInRules.map((rule) => ({
+    id: rule.meta.name,
+    rule: rule as unknown as ErasedRule,
+    plugin: false,
+  })),
 );
+
+function effectiveRegistry(
+  plugins: Readonly<Record<string, GeoLintPlugin>>,
+): readonly RegistryRule[] {
+  if (Object.keys(plugins).length === 0) return builtInRegistry;
+  const registry: RegistryRule[] = [...builtInRegistry];
+  for (const namespace of Object.keys(plugins).sort()) {
+    const plugin = plugins[namespace]!;
+    for (const localName of Object.keys(plugin.rules).sort()) {
+      registry.push({
+        id: `${namespace}/${localName}`,
+        rule: plugin.rules[localName] as unknown as ErasedRule,
+        plugin: true,
+      });
+    }
+  }
+  return registry;
+}
+
+const listenerHooks = Object.freeze([
+  'featureStart',
+  'property',
+  'propertyValue',
+  'coordinate',
+  'coordinateLexeme',
+  'geometry',
+  'feature',
+  'document',
+] as const satisfies readonly (keyof RuleListener<
+  readonly SummaryFactName[]
+>)[]);
+
+function pluginFailure(
+  ruleId: string,
+  filePath: string,
+  cause: unknown,
+): GeoLintPluginError {
+  return new GeoLintPluginError(
+    `Plugin rule "${ruleId}" failed while linting ${filePath}.`,
+    'GEOLINT_PLUGIN_ERROR',
+    ruleId,
+    filePath,
+    { cause },
+  );
+}
+
+function isThenable(value: unknown): boolean {
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    typeof (value as { readonly then?: unknown }).then === 'function'
+  );
+}
+
+function pluginListener(
+  value: unknown,
+  ruleId: string,
+  filePath: string,
+  requires: readonly SummaryFactName[],
+): RuleListener<readonly SummaryFactName[]> {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    isThenable(value)
+  ) {
+    throw pluginFailure(
+      ruleId,
+      filePath,
+      new TypeError('create() must return a synchronous listener object.'),
+    );
+  }
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw pluginFailure(
+      ruleId,
+      filePath,
+      new TypeError('create() must return a plain listener object.'),
+    );
+  }
+  const record = value as Record<string, unknown>;
+  const unknown = Object.keys(record).find(
+    (key) => !listenerHooks.includes(key as (typeof listenerHooks)[number]),
+  );
+  if (unknown) {
+    throw pluginFailure(
+      ruleId,
+      filePath,
+      new TypeError(`Unsupported listener hook "${unknown}".`),
+    );
+  }
+  const wrapped: Record<string, (event: unknown) => undefined> = {};
+  for (const hook of listenerHooks) {
+    const descriptor = Object.getOwnPropertyDescriptor(record, hook);
+    if (!descriptor) continue;
+    if (!('value' in descriptor) || typeof descriptor.value !== 'function') {
+      throw pluginFailure(
+        ruleId,
+        filePath,
+        new TypeError(`Listener hook "${hook}" must be a function.`),
+      );
+    }
+    const callback = descriptor.value as (event: unknown) => unknown;
+    wrapped[hook] = (event): undefined => {
+      let result: unknown;
+      try {
+        result = callback(event);
+      } catch (error) {
+        throw pluginFailure(ruleId, filePath, error);
+      }
+      if (isThenable(result)) {
+        throw pluginFailure(
+          ruleId,
+          filePath,
+          new TypeError(`Listener hook "${hook}" returned a thenable.`),
+        );
+      }
+      return undefined;
+    };
+  }
+  if (requires.length > 0 && typeof wrapped.document !== 'function') {
+    throw pluginFailure(
+      ruleId,
+      filePath,
+      new TypeError(
+        'A rule with aggregate requirements must provide a document hook.',
+      ),
+    );
+  }
+  return wrapped as RuleListener<readonly SummaryFactName[]>;
+}
 
 function severity(value: 'warn' | 'error'): Severity {
   return value === 'warn' ? 'warning' : 'error';
@@ -182,6 +324,7 @@ function settingParts(setting: Exclude<RuleSetting, 'off'>): {
 }
 
 function compileRules(
+  plugins: ResolvedConfig['plugins'],
   rules: ResolvedConfig['rules'],
   filePath: string,
   inputKind: InputKind,
@@ -193,42 +336,53 @@ function compileRules(
   coordinateLexemeObservations: CoordinateLexemeObservation[],
   featureIdObservations: FeatureIdObservation[],
 ): void {
+  const registry = effectiveRegistry(plugins);
+  const knownRules = new Set(registry.map(({ id }) => id));
   for (const [name, setting] of Object.entries(rules)) {
-    if (setting !== 'off' && !ruleRegistry.has(name)) {
+    if (setting !== 'off' && !knownRules.has(name)) {
       throw new GeoLintConfigError(
         `Unknown enabled rule "${name}".`,
         'GEOLINT_UNKNOWN_RULE',
       );
     }
   }
-  for (const rule of ruleRegistry.values()) {
-    const setting = rules[rule.meta.name];
+  for (const entry of registry) {
+    const { rule, id: ruleId } = entry;
+    const setting = rules[ruleId];
     if (!setting || setting === 'off') continue;
     const compiled = settingParts(setting);
     let options: unknown;
     if (rule.meta.schema === null) {
       if (compiled.hasOptions) {
         throw new GeoLintConfigError(
-          `Rule "${rule.meta.name}" does not accept options.`,
+          `Rule "${ruleId}" does not accept options.`,
           'GEOLINT_INVALID_RULE_OPTIONS',
         );
       }
     } else {
-      options = rule.meta.schema.parse(
-        compiled.options,
-        `rules.${rule.meta.name}`,
-      );
+      options = rule.meta.schema.parse(compiled.options, `rules.${ruleId}`);
     }
     const ruleContext = context(
-      rule.meta.name,
+      ruleId,
       filePath,
       compiled.severity,
       diagnostics,
     );
-    const instance = rule.create(ruleContext, options);
     const requires = rule.meta.requires ?? [];
-    validateRuleListener(rule.meta.name, requires, instance);
-    if (rule.meta.name === 'coordinate-precision') {
+    let instance: RuleListener<readonly SummaryFactName[]>;
+    if (entry.plugin) {
+      let created: unknown;
+      try {
+        created = rule.create(ruleContext, options);
+      } catch (error) {
+        throw pluginFailure(ruleId, filePath, error);
+      }
+      instance = pluginListener(created, ruleId, filePath, requires);
+    } else {
+      instance = rule.create(ruleContext, options);
+      validateRuleListener(ruleId, requires, instance);
+    }
+    if (ruleId === 'coordinate-precision') {
       if (inputKind === 'object') {
         throw new GeoLintCapabilityError(
           'Rule "coordinate-precision" requires numeric source lexemes, which parsed object input cannot provide.',
@@ -251,7 +405,7 @@ function compileRules(
           if (offendingToken === undefined) return;
           diagnostics.reportLazy(
             {
-              code: rule.meta.name,
+              code: ruleId,
               source: 'rule',
               severity: compiled.severity,
             },
@@ -276,16 +430,16 @@ function compileRules(
     }
     if (instance.coordinateLexeme && inputKind === 'object') {
       throw new GeoLintCapabilityError(
-        `Rule "${rule.meta.name}" requires numeric source lexemes, which parsed object input cannot provide.`,
+        `Rule "${ruleId}" requires numeric source lexemes, which parsed object input cannot provide.`,
         'GEOLINT_CAPABILITY_NUMERIC_LEXEMES',
       );
     }
-    if (rule.meta.name === 'require-feature-id') {
+    if (ruleId === 'require-feature-id') {
       featureIdObservations.push((index, path, status) => {
         if (status === 'missing') {
           diagnostics.reportLazy(
             {
-              code: rule.meta.name,
+              code: ruleId,
               source: 'rule',
               severity: compiled.severity,
             },
@@ -299,7 +453,7 @@ function compileRules(
       });
       continue;
     }
-    if (rule.meta.name === 'unique-feature-id') {
+    if (ruleId === 'unique-feature-id') {
       const strings = new Set<string>();
       const numbers = new Set<number>();
       featureIdObservations.push((index, path, status, id) => {
@@ -309,7 +463,7 @@ function compileRules(
         if (duplicate) {
           diagnostics.reportLazy(
             {
-              code: rule.meta.name,
+              code: ruleId,
               source: 'rule',
               severity: compiled.severity,
             },
@@ -326,7 +480,7 @@ function compileRules(
       });
       continue;
     }
-    if (rule.meta.name === 'valid-coordinate-range') {
+    if (ruleId === 'valid-coordinate-range') {
       coordinateObservations.push(
         (values, featureIndex, parentPath, positionIndex) => {
           const longitude = values[0]!;
@@ -339,7 +493,7 @@ function compileRules(
           ) {
             diagnostics.reportLazy(
               {
-                code: rule.meta.name,
+                code: ruleId,
                 source: 'rule',
                 severity: compiled.severity,
               },
@@ -364,7 +518,7 @@ function compileRules(
     for (const fact of requires) facts.add(fact);
     if (document) {
       aggregates.push({
-        code: rule.meta.name,
+        code: ruleId,
         source: 'rule',
         severity: compiled.severity,
         requires,
@@ -642,12 +796,6 @@ export function compilePolicy(
   diagnostics: DiagnosticCollector,
   baseline?: BaselineFileEntry,
 ): CompiledPolicy {
-  if (Object.keys(config.plugins).length > 0) {
-    throw new GeoLintPluginError(
-      'External plugin loading is not implemented yet.',
-      'GEOLINT_PLUGIN_LOADING_UNAVAILABLE',
-    );
-  }
   const listeners: SemanticListener[] = [];
   const facts = new Set<SummaryFactName>();
   const aggregates: AggregatePolicy[] = [];
@@ -656,6 +804,7 @@ export function compilePolicy(
   const featureIdObservations: FeatureIdObservation[] = [];
   const featureByteObservations: FeatureByteObservation[] = [];
   compileRules(
+    config.plugins,
     config.rules,
     filePath,
     inputKind,

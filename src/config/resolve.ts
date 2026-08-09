@@ -8,6 +8,7 @@ import type {
   ResolvedConfig,
   ResolvedFileConfig,
 } from '../types/config.js';
+import { stabilizePlugin } from '../plugins/plugin.js';
 
 export function normalizeFilePath(
   projectRoot: string,
@@ -33,7 +34,14 @@ function finalizeConfig(
 ): ResolvedConfig {
   const resolvedConfig: ResolvedConfig = {
     projectRoot: resolve(projectRoot),
-    plugins: Object.freeze({ ...merged.plugins }),
+    plugins: Object.freeze(
+      Object.fromEntries(
+        Object.entries(merged.plugins ?? {}).map(([namespace, plugin]) => [
+          namespace,
+          stabilizePlugin(plugin),
+        ]),
+      ),
+    ),
     rules: Object.freeze({ ...merged.rules }),
     budgets: Object.freeze({ ...merged.budgets }),
     regression: Object.freeze({ ...merged.regression }),

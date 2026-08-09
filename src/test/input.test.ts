@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  GeoLintConfigError,
-  GeoLintInputError,
-  GeoLintPluginError,
-} from '../engine/errors.js';
+import { GeoLintConfigError, GeoLintInputError } from '../engine/errors.js';
 import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
 
 const valid = {
@@ -141,11 +137,13 @@ test('config incompatibility is found before a large object validation walk', as
   );
 });
 
-test('external plugin execution fails explicitly', async () => {
+test('malformed external plugins fail configuration validation', async () => {
   await assert.rejects(
-    lintGeoJSON(valid, { config: { plugins: { example: {} } } }),
+    lintGeoJSON(valid, {
+      config: { plugins: { example: {} as never } },
+    }),
     (error) =>
-      error instanceof GeoLintPluginError &&
-      error.code === 'GEOLINT_PLUGIN_LOADING_UNAVAILABLE',
+      error instanceof GeoLintConfigError &&
+      error.code === 'GEOLINT_INVALID_PLUGIN',
   );
 });

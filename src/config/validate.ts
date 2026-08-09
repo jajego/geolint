@@ -2,6 +2,7 @@ import { assertGlob } from './glob.js';
 import { parseByteSize } from '../engine/byte-size.js';
 import { GeoLintConfigError } from '../engine/errors.js';
 import type { GeoLintConfig } from '../types/config.js';
+import { validatePlugin } from '../plugins/plugin.js';
 
 const configKeys = new Set([
   'extends',
@@ -249,7 +250,29 @@ export function validateConfig(value: unknown): asserts value is GeoLintConfig {
   if ('extends' in config) stringArray(config.extends, 'config.extends');
   if ('files' in config) patterns(config.files, 'config.files');
   if ('ignores' in config) patterns(config.ignores, 'config.ignores');
-  if ('plugins' in config) record(config.plugins, 'config.plugins');
+  if (Object.hasOwn(config, 'plugins')) {
+    const pluginDescriptor = Object.getOwnPropertyDescriptor(config, 'plugins');
+    const plugins = record(
+      pluginDescriptor && 'value' in pluginDescriptor
+        ? pluginDescriptor.value
+        : fail('config.plugins', 'an own data property'),
+      'config.plugins',
+    );
+    for (const namespace of Object.keys(plugins)) {
+      if (namespace.length === 0 || namespace.includes('/')) {
+        fail(
+          `config.plugins.${namespace || '<empty>'}`,
+          'a non-empty namespace without "/"',
+        );
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(plugins, namespace);
+      const plugin =
+        descriptor && 'value' in descriptor
+          ? descriptor.value
+          : fail(`config.plugins.${namespace}`, 'an own data property');
+      validatePlugin(plugin, `config.plugins.${namespace}`);
+    }
+  }
   validatePolicy(config, 'config');
   if (!('overrides' in config)) return;
   if (!Array.isArray(config.overrides)) fail('config.overrides', 'an array');

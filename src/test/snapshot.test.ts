@@ -13,6 +13,8 @@ import {
 } from '../regression/schema.js';
 import { snapshotBaseline } from '../regression/snapshot.js';
 import type { GeoLintConfig } from '../types/config.js';
+import { definePlugin } from '../plugins/plugin.js';
+import { defineRule } from '../rules/define-rule.js';
 
 function point(id: string | number | undefined, value: unknown = 1) {
   return {
@@ -181,7 +183,20 @@ test('snapshot ignores ordinary policies and captures objective complete facts',
     const config: GeoLintConfig = {
       extends: ['geolint/web'],
       files: ['map.geojson'],
-      plugins: { unavailable: {} },
+      plugins: {
+        unavailable: definePlugin({
+          meta: { apiVersion: 1 },
+          rules: {
+            throwing: defineRule({
+              meta: { name: 'throwing', schema: null },
+              create() {
+                throw new Error('snapshot must not execute this rule');
+              },
+            }),
+          },
+        }),
+      },
+      rules: { 'unavailable/throwing': 'error' },
       budgets: { featureCount: 0 },
       regression: {
         baseline: 'nested/baseline.json',

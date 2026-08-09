@@ -21,6 +21,7 @@ test('root module exports only implemented consumer APIs', () => {
     'GeoLintPluginError',
     'GeoLintTargetError',
     'defineConfig',
+    'definePlugin',
     'defineRule',
     'jsonPointer',
     'lintFile',
@@ -28,6 +29,43 @@ test('root module exports only implemented consumer APIs', () => {
     'lintGeoJSONText',
     'optionSchema',
   ]);
+});
+
+test('plugin authoring preserves rule keys, option inference, and V1 types', () => {
+  const rule = geolint.defineRule({
+    meta: {
+      name: 'typed',
+      schema: geolint.optionSchema.object({
+        value: geolint.optionSchema.string(),
+      }),
+    },
+    create(_context, options) {
+      const value: string = options.value;
+      // @ts-expect-error inferred option is a string
+      const invalid: number = options.value;
+      void value;
+      void invalid;
+      return {};
+    },
+  });
+  const plugin = geolint.definePlugin({
+    meta: { apiVersion: 1 },
+    rules: { typed: rule },
+  });
+  const key: typeof rule = plugin.rules.typed;
+  const assignable: geolint.GeoLintPlugin = plugin;
+  void key;
+  void assignable;
+
+  const invalidVersion = () =>
+    geolint.definePlugin({
+      meta: {
+        // @ts-expect-error V1 supports exactly API version 1
+        apiVersion: 2,
+      },
+      rules: {},
+    });
+  void invalidVersion;
 });
 
 test('public config types reject override baseline changes', () => {

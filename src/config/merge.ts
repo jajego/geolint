@@ -4,6 +4,8 @@ import type {
   RegressionConfig,
 } from '../types/config.js';
 import { GeoLintConfigError } from '../engine/errors.js';
+import { samePluginIdentity } from '../plugins/plugin.js';
+import type { GeoLintPlugin } from '../plugins/plugin.js';
 
 function mergeObject<T extends object>(
   base: T | undefined,
@@ -63,11 +65,11 @@ function mergeRegression(
 }
 
 function mergePlugins(
-  base: Readonly<Record<string, unknown>> | undefined,
-  next: Readonly<Record<string, unknown>> | undefined,
-): Readonly<Record<string, unknown>> {
+  base: Readonly<Record<string, GeoLintPlugin>> | undefined,
+  next: Readonly<Record<string, GeoLintPlugin>> | undefined,
+): Readonly<Record<string, GeoLintPlugin>> {
   for (const [namespace, plugin] of Object.entries(next ?? {})) {
-    if (base?.[namespace] && base[namespace] !== plugin) {
+    if (base?.[namespace] && !samePluginIdentity(base[namespace], plugin)) {
       throw new GeoLintConfigError(
         `Plugin namespace "${namespace}" has conflicting identities.`,
         'GEOLINT_PLUGIN_CONFLICT',

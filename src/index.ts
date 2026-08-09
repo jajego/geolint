@@ -18,6 +18,7 @@ export {
 } from './engine/errors.js';
 export { jsonPointer } from './scanner/json-pointer.js';
 export { defineRule } from './rules/define-rule.js';
+export { definePlugin } from './plugins/plugin.js';
 export { optionSchema } from './rules/option-schema.js';
 
 export type {
@@ -26,6 +27,7 @@ export type {
   BudgetSetting,
   BudgetSeverity,
   GeoLintConfig,
+  GeoLintConfigFragment,
   GeoLintOverride,
   RegressionChecks,
   RegressionConfig,
@@ -33,6 +35,7 @@ export type {
   RegressionSeverity,
   RegressionThresholds,
 } from './types/config.js';
+export type { GeoLintPlugin } from './plugins/plugin.js';
 export type {
   RuleContext,
   RuleDefinition,
