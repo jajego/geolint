@@ -157,3 +157,24 @@ index replay; later lazy replay is included in semantic traversal timing and
 its replayed bytes/object counts remain explicit. Very large negative
 coordinate exponents saturate reported effective decimals at
 `Number.MAX_SAFE_INTEGER`, while threshold comparison remains correct.
+
+## Phase 7: equivalence torture decisions
+
+The torture suite uses one test-only differential harness: `JSON.parse` plus
+object linting is the ordinary JSON oracle, then forced buffered and indexed
+execution are compared without sorting emitted results. Ordinary projections
+remove only timing and source-only fields unavailable to object input;
+buffered/indexed source projections remain strict. Public hook traces are also
+compared in emitted order.
+
+Recursive member permutations use a fixed 32-bit `Math.imul` PRNG and preserve
+array order. Failures include the fixture, seed, permutation, strategies, and a
+bounded source reproduction. No property-testing dependency, shrinker, corpus
+writer, or public testing API was added. The bounded torture suite runs in
+ordinary CI and separately through `npm run test:torture`.
+
+Phase 7 found no semantic divergence requiring production changes. The V5
+stdin replay cases for memory replay, temp-file spooling, and cleanup on
+success, parse failure, plugin failure, and abort remain deferred with the
+underlying stdin/spooling feature. Pathological semantic GeometryCollection
+recursion also remains the previously documented robustness limit.

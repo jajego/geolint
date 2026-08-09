@@ -28,6 +28,7 @@
     "clean": "node --input-type=module -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true })\"",
     "test": "npm run build && node --test dist/test/*.test.js",
     "test:integration": "npm run test",
+    "test:torture": "npm run build && node --test dist/test/torture-*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "format": "prettier --write src package.json tsconfig.json eslint.config.js README.md docs/implementation-notes.md .prettierrc.json",

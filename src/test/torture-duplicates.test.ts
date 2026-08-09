@@ -1,0 +1,328 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { lintGeoJSONTextWithParser } from '../engine/lint-input.js';
+import {
+  createExecutionRequirements,
+  type SemanticListener,
+} from '../engine/requirements.js';
+import {
+  IndexedSyntaxError,
+  parseIndexedSource,
+  type IndexedInstrumentation,
+} from '../parser/indexed-source.js';
+import { scanGeoJSON, type ScanInstrumentation } from '../scanner/scan.js';
+import type { GeoLintConfig } from '../types/config.js';
+import {
+  assertEquivalentSources,
+  assertOrdinaryEquivalence,
+} from './torture-harness.js';
+
+const feature = (members: string): string =>
+  `{"type":"Feature",${members},"properties":{},"geometry":null}`;
+const geometryFeature = (geometry: string): string =>
+  `{"type":"Feature","id":"winner","properties":{"a":1},"geometry":${geometry}}`;
+
+const duplicateCases: readonly [string, string][] = [
+  ['root type bad/good', '{"type":"Bad","type":"Point","coordinates":[1,2]}'],
+  ['root type good/bad', '{"type":"Point","type":"Bad","coordinates":[1,2]}'],
+  [
+    'FeatureCollection features bad/good',
+    '{"type":"FeatureCollection","features":42,"features":[]}',
+  ],
+  [
+    'FeatureCollection features good/bad',
+    '{"type":"FeatureCollection","features":[],"features":42}',
+  ],
+  [
+    'root bbox bad/good',
+    '{"type":"Point","bbox":["bad"],"bbox":[0,0,1,1],"coordinates":[1,2]}',
+  ],
+  [
+    'root bbox good/bad',
+    '{"type":"Point","bbox":[0,0,1,1],"bbox":["bad"],"coordinates":[1,2]}',
+  ],
+  ['Feature type bad/good', feature('"type":"Bad","type":"Feature"')],
+  ['Feature type good/bad', feature('"type":"Feature","type":"Bad"')],
+  ['Feature id three-way', feature('"id":null,"id":"old","id":7')],
+  [
+    'Feature properties bad/good',
+    '{"type":"Feature","properties":42,"properties":{"a":1},"geometry":null}',
+  ],
+  [
+    'Feature properties good/bad',
+    '{"type":"Feature","properties":{"a":1},"properties":42,"geometry":null}',
+  ],
+  [
+    'Feature geometry bad/good',
+    '{"type":"Feature","properties":{},"geometry":42,"geometry":{"type":"Point","coordinates":[1,2]}}',
+  ],
+  [
+    'Feature geometry good/bad',
+    '{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[1,2]},"geometry":42}',
+  ],
+  [
+    'Feature bbox three-way',
+    '{"type":"Feature","bbox":["bad"],"bbox":[0,0],"bbox":[0,0,1,1],"properties":{},"geometry":null}',
+  ],
+  [
+    'Feature bbox good/bad',
+    '{"type":"Feature","bbox":[0,0,1,1],"bbox":["bad"],"properties":{},"geometry":null}',
+  ],
+  [
+    'Feature bbox bad/good',
+    '{"type":"Feature","bbox":["bad"],"bbox":[0,0,1,1],"properties":{},"geometry":null}',
+  ],
+  [
+    'geometry type bad/good',
+    '{"type":"Bad","type":"Point","coordinates":[1,2]}',
+  ],
+  [
+    'geometry type good/bad',
+    '{"type":"Point","type":"Bad","coordinates":[1,2]}',
+  ],
+  [
+    'geometry coordinates bad/good',
+    '{"type":"Point","coordinates":["bad"],"coordinates":[1,2]}',
+  ],
+  [
+    'geometry coordinates good/bad',
+    '{"type":"Point","coordinates":[1,2],"coordinates":["bad"]}',
+  ],
+  [
+    'geometry coordinates three-way',
+    '{"type":"Point","coordinates":null,"coordinates":[9],"coordinates":[1,2]}',
+  ],
+  [
+    'GeometryCollection geometries bad/good',
+    '{"type":"GeometryCollection","geometries":42,"geometries":[{"type":"Point","coordinates":[1,2]}]}',
+  ],
+  [
+    'GeometryCollection geometries good/bad',
+    '{"type":"GeometryCollection","geometries":[{"type":"Point","coordinates":[1,2]}],"geometries":42}',
+  ],
+  [
+    'geometry bbox good/bad',
+    '{"type":"Point","coordinates":[1,2],"bbox":[0,0,1,1],"bbox":["bad"]}',
+  ],
+  [
+    'geometry bbox bad/good',
+    '{"type":"Point","coordinates":[1,2],"bbox":["bad"],"bbox":[0,0,1,1]}',
+  ],
+  [
+    'escaped semantic names',
+    String.raw`{"type":"Bad","\u0074ype":"Point","coordinates":[9],"coord\u0069nates":[1,2]}`,
+  ],
+  [
+    'escaped property names',
+    String.raw`{"type":"Feature","properties":{"a":1,"\u0061":2,"a":3},"geometry":null}`,
+  ],
+];
+
+const richConfig: GeoLintConfig = {
+  extends: ['geolint/recommended'],
+  rules: {
+    'require-feature-id': 'warn',
+    'consistent-property-presence': 'warn',
+  },
+  budgets: {
+    featureCount: 0,
+    totalVertices: 0,
+    feature: { vertices: 0 },
+  },
+  diagnostics: { maxPerCodePerFile: 2, maxPerFile: 20 },
+};
+
+test('duplicate winner matrix matches JSON.parse across all semantic levels', async () => {
+  for (let index = 0; index < duplicateCases.length; index += 1) {
+    const [fixture, source] = duplicateCases[index]!;
+    await assertOrdinaryEquivalence({
+      source,
+      fixture,
+      permutation: index,
+      config: richConfig,
+    });
+  }
+});
+
+test('losing duplicate subtrees are semantically invisible', async () => {
+  const positions = Array.from(
+    { length: 1_000 },
+    (_, index) => `[${index % 180},${index % 90}]`,
+  ).join(',');
+  const cases: readonly [string, string, string][] = [
+    [
+      'invalid losing properties',
+      '{"type":"Feature","id":1,"properties":42,"properties":{"a":1},"geometry":null}',
+      '{"type":"Feature","id":1,"properties":{"a":1},"geometry":null}',
+    ],
+    [
+      'invalid losing geometry',
+      '{"type":"Feature","id":1,"properties":{"a":1},"geometry":{"type":"Point","coordinates":["bad"]},"geometry":null}',
+      '{"type":"Feature","id":1,"properties":{"a":1},"geometry":null}',
+    ],
+    [
+      'huge losing coordinates',
+      geometryFeature(
+        `{"type":"MultiPoint","coordinates":[${positions}],"coordinates":[[1,2]]}`,
+      ),
+      geometryFeature('{"type":"MultiPoint","coordinates":[[1,2]]}'),
+    ],
+    [
+      'huge A and B with small C winner',
+      geometryFeature(
+        `{"type":"MultiPoint","coordinates":[${positions}],"coordinates":[${positions}],"coordinates":[[1,2]]}`,
+      ),
+      geometryFeature('{"type":"MultiPoint","coordinates":[[1,2]]}'),
+    ],
+  ];
+  for (const [fixture, source, winner] of cases) {
+    await assertEquivalentSources(
+      { source, fixture, config: richConfig },
+      winner,
+    );
+  }
+});
+
+test('duplicate cardinality retains one decoded property winner', () => {
+  const occurrences = Array.from(
+    { length: 10_000 },
+    (_, index) => `"same":${index}`,
+  ).join(',');
+  const source = `{"type":"Feature","properties":{${occurrences}},"geometry":null}`;
+  const values: unknown[] = [];
+  const listener: SemanticListener = {
+    propertyValue: ({ value }) => values.push(value),
+  };
+  const requirements = createExecutionRequirements({ listener });
+  const instrumentation: IndexedInstrumentation = {
+    sourceBytes: 0,
+    syntaxValidationMs: 0,
+    initialIndexReplayMs: 0,
+    indexedObjects: 0,
+    winningSpans: 0,
+    coordinateSpans: 0,
+    sourceBytesReplayed: 0,
+  };
+  const parsed = parseIndexedSource(source, requirements, instrumentation);
+  scanGeoJSON(parsed.value, {
+    filePath: 'map.geojson',
+    requirements,
+    listener,
+  });
+  assert.deepEqual(values, [9_999]);
+  assert.equal(instrumentation.indexedObjects, 2);
+  assert.equal(instrumentation.winningSpans, 4);
+});
+
+test('huge coordinate duplicates visit only winning Positions', async () => {
+  const count = 2_000;
+  const huge = Array.from(
+    { length: count },
+    (_, index) => `[${index % 180},${index % 90}]`,
+  ).join(',');
+  const cases: readonly [string, number][] = [
+    [`"coordinates":[${huge}],"coordinates":[[1,2]]`, 1],
+    [`"coordinates":[[1,2]],"coordinates":[${huge}]`, count],
+    [
+      `"coordinates":[${huge}],"coordinates":[${huge}],"coordinates":[[1,2]]`,
+      1,
+    ],
+  ];
+  for (const [members, expected] of cases) {
+    let coordinateEvents = 0;
+    let lexemeEvents = 0;
+    const listener: SemanticListener = {
+      coordinate: () => {
+        coordinateEvents += 1;
+      },
+      coordinateLexeme: () => {
+        lexemeEvents += 1;
+      },
+    };
+    const requirements = createExecutionRequirements({
+      facts: ['vertexCount', 'coordinateDimensionStats', 'derivedExtent'],
+      listener,
+    });
+    const source = geometryFeature(`{"type":"MultiPoint",${members}}`);
+    const parsed = parseIndexedSource(source, requirements);
+    const instrumentation: ScanInstrumentation = {
+      coordinateTraversals: 0,
+      positionVisits: 0,
+      coordinatePathMaterializations: 0,
+      propertyPathMaterializations: 0,
+      rawLexemeCollections: 0,
+      coordinateLexemeEvents: 0,
+    };
+    const summary = scanGeoJSON(parsed.value, {
+      filePath: 'map.geojson',
+      requirements,
+      listener,
+      instrumentation,
+    });
+    assert.equal(instrumentation.positionVisits, expected);
+    assert.equal(instrumentation.rawLexemeCollections, expected);
+    assert.equal(instrumentation.coordinateLexemeEvents, expected);
+    assert.equal(coordinateEvents, expected);
+    assert.equal(lexemeEvents, expected);
+    assert.equal(summary.totalVertices, expected);
+    await assertOrdinaryEquivalence({
+      fixture: `huge coordinate winner count ${expected}`,
+      source,
+      config: richConfig,
+    });
+  }
+});
+
+test('syntax errors in would-be losing values prevent all semantics', async () => {
+  const validFeature =
+    '{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[1,2]}}';
+  const manyFeatures = Array.from({ length: 100 }, () => validFeature).join(
+    ',',
+  );
+  const malformed = [
+    '?',
+    '{"type":?',
+    '{"type":"Point","coordinates":?,"coordinates":[1,2]}',
+    '{"type":"Feature","properties":{"nested":?},"properties":{},"geometry":null}',
+    `{"type":"FeatureCollection","features":[${manyFeatures},?]}`,
+    `${validFeature}?`,
+    `${validFeature}{}`,
+    `${validFeature}/*comment*/`,
+  ];
+  for (const source of malformed) {
+    let events = 0;
+    const listener: SemanticListener = {
+      featureStart: () => {
+        events += 1;
+      },
+      coordinate: () => {
+        events += 1;
+      },
+      document: () => {
+        events += 1;
+      },
+    };
+    const requirements = createExecutionRequirements({ listener });
+    assert.throws(() => {
+      const parsed = parseIndexedSource(source, requirements);
+      scanGeoJSON(parsed.value, {
+        filePath: 'map.geojson',
+        requirements,
+        listener,
+      });
+    }, IndexedSyntaxError);
+    assert.equal(events, 0);
+    for (const parser of ['buffered', 'indexed'] as const) {
+      const result = await lintGeoJSONTextWithParser(source, {
+        parser,
+        config: {},
+      });
+      assert.deepEqual(
+        result.diagnostics.map(({ code }) => code),
+        ['parse/invalid-json'],
+      );
+      assert.equal(result.summary, undefined);
+    }
+  }
+});
