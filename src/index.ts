@@ -1,6 +1,8 @@
 import type { GeoLintConfig } from './types/config.js';
 
 export { lintFile, lintGeoJSON, lintGeoJSONText } from './engine/lint-input.js';
+export { lintFiles } from './engine/lint-files.js';
+export type { LintFilesOptions } from './engine/lint-files.js';
 export type {
   FileLintOptions,
   InMemoryLintOptions,
@@ -68,6 +70,7 @@ export type {
   JsonPrimitive,
   JsonValue,
   JsonValueType,
+  LintResult,
   PropertyEvent,
   PropertyStats,
   PropertyValueEvent,

@@ -63,6 +63,8 @@ export interface SnapshotResult {
 
 export interface SnapshotOptions extends ConfigRuntimeOptions {
   readonly targets?: readonly string[];
+  readonly baselinePath?: string;
+  readonly noIgnore?: boolean;
 }
 
 function complete(summary: FileSummary): boolean {
@@ -220,14 +222,21 @@ export async function snapshotBaseline(
   const cwd = resolve(options.cwd ?? process.cwd());
   const config = await resolveRuntimeConfig(options);
   const mode = options.targets === undefined ? 'full' : 'partial';
-  const targets = await resolveTargets(config, options.targets, cwd);
+  const targets = await resolveTargets(
+    config,
+    options.targets,
+    cwd,
+    options.noIgnore,
+  );
   if (targets.some((target) => target.kind !== 'file')) {
     throw new GeoLintTargetError(
       'Snapshot targets must be files, not stdin.',
       'GEOLINT_INVALID_SNAPSHOT_TARGET',
     );
   }
-  const baselinePath = resolveBaselinePath(config);
+  const baselinePath = options.baselinePath
+    ? resolve(cwd, options.baselinePath)
+    : resolveBaselinePath(config);
   const before = await loadBaseline(baselinePath);
   const captured = Object.create(null) as Record<string, BaselineFileEntry>;
   for (const target of targets) {

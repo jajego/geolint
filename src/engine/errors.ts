@@ -1,3 +1,5 @@
+import type { LintResult } from '../types/semantic.js';
+
 export class GeoLintError extends Error {
   constructor(
     message: string,
@@ -25,5 +27,19 @@ export class GeoLintPluginError extends GeoLintError {
     super(message, code, options);
   }
 }
-export class GeoLintBatchError extends GeoLintError {}
+export class GeoLintBatchError extends GeoLintError {
+  readonly errors: readonly GeoLintError[];
+
+  constructor(
+    errors: readonly GeoLintError[],
+    readonly partialResult: LintResult,
+  ) {
+    super(
+      `${errors.length} target${errors.length === 1 ? '' : 's'} failed operationally.`,
+      'GEOLINT_BATCH_ERROR',
+      { cause: errors[0] },
+    );
+    this.errors = Object.freeze([...errors]);
+  }
+}
 export class GeoLintInternalError extends GeoLintError {}

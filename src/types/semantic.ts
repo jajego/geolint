@@ -189,3 +189,14 @@ export interface FileLintResult {
   readonly warningCount: number;
   readonly durationMs: number;
 }
+
+export interface LintResult {
+  readonly schemaVersion: 1;
+  readonly geolintVersion: string;
+  readonly files: readonly FileLintResult[];
+  readonly errorCount: number;
+  readonly warningCount: number;
+  readonly suppressedDiagnosticCount: number;
+  readonly skippedPolicyCount: number;
+  readonly durationMs: number;
+}

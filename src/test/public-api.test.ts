@@ -25,6 +25,7 @@ test('root module exports only implemented consumer APIs', () => {
     'defineRule',
     'jsonPointer',
     'lintFile',
+    'lintFiles',
     'lintGeoJSON',
     'lintGeoJSONText',
     'optionSchema',

@@ -35,7 +35,14 @@ import {
 } from './errors.js';
 import type { ExecutionRequirements } from './requirements.js';
 
-type ParserStrategy = 'auto' | 'buffered' | 'indexed';
+export type ParserStrategy = 'auto' | 'buffered' | 'indexed';
+
+export interface ResolvedSourceOptions {
+  readonly filePath: string;
+  readonly config: ResolvedConfig;
+  readonly parser: ParserStrategy;
+  readonly baseline?: BaselineFileEntry;
+}
 
 export interface InMemoryLintOptions extends GeoLintRuntimeContext {
   readonly filename?: string;
@@ -138,11 +145,10 @@ async function regressionBaseline(
   return baseline.files[identity];
 }
 
-async function lintGeoJSONTextUsingParser(
+export function lintResolvedText(
   text: string,
-  options: InMemoryLintOptions,
-  parser: ParserStrategy,
-): Promise<FileLintResult> {
+  options: ResolvedSourceOptions,
+): FileLintResult {
   if (typeof text !== 'string') {
     throw new GeoLintInputError(
       'lintGeoJSONText() requires a string.',
@@ -150,22 +156,20 @@ async function lintGeoJSONTextUsingParser(
     );
   }
   const startedAt = performance.now();
-  const context = await inputContext(options);
   const collector = new DiagnosticCollector(
-    context.filePath,
-    context.config.diagnostics,
+    options.filePath,
+    options.config.diagnostics,
   );
-  const baseline = await regressionBaseline(context.config, context.filePath);
   const policy = compilePolicy(
-    context.config,
-    context.filePath,
+    options.config,
+    options.filePath,
     'text',
     collector,
-    baseline,
+    options.baseline,
   );
   const requirements = requirementsFor(policy, true);
   if (
-    parser === 'buffered' &&
+    options.parser === 'buffered' &&
     (requirements.numericLexemes || requirements.featureByteSpans)
   ) {
     throw new GeoLintCapabilityError(
@@ -176,8 +180,8 @@ async function lintGeoJSONTextUsingParser(
     );
   }
   const strategy =
-    parser === 'indexed' ||
-    (parser === 'auto' &&
+    options.parser === 'indexed' ||
+    (options.parser === 'auto' &&
       (requirements.numericLexemes || requirements.featureByteSpans))
       ? 'indexed'
       : 'buffered';
@@ -220,6 +224,20 @@ async function lintGeoJSONTextUsingParser(
     });
     return fileResult(collector, startedAt);
   }
+}
+
+async function lintGeoJSONTextUsingParser(
+  text: string,
+  options: InMemoryLintOptions,
+  parser: ParserStrategy,
+): Promise<FileLintResult> {
+  const context = await inputContext(options);
+  const baseline = await regressionBaseline(context.config, context.filePath);
+  return lintResolvedText(text, {
+    ...context,
+    parser,
+    ...(baseline ? { baseline } : {}),
+  });
 }
 
 export function lintGeoJSONText(
@@ -270,6 +288,19 @@ async function lintFileUsingParser(
   parser: ParserStrategy,
 ): Promise<FileLintResult> {
   const absolutePath = resolve(options.cwd ?? process.cwd(), path);
+  const context = await inputContext({ ...options, filename: absolutePath });
+  const baseline = await regressionBaseline(context.config, context.filePath);
+  return lintResolvedFile(absolutePath, {
+    ...context,
+    parser,
+    ...(baseline ? { baseline } : {}),
+  });
+}
+
+export async function lintResolvedFile(
+  absolutePath: string,
+  options: ResolvedSourceOptions,
+): Promise<FileLintResult> {
   let bytes: Buffer;
   try {
     bytes = await readFile(absolutePath);
@@ -280,15 +311,21 @@ async function lintFileUsingParser(
       { cause },
     );
   }
+  return lintResolvedBytes(bytes, options);
+}
+
+export function lintResolvedBytes(
+  bytes: Uint8Array,
+  options: ResolvedSourceOptions,
+): FileLintResult {
   let text: string;
   try {
     text = decodeSource(bytes);
   } catch {
     const startedAt = performance.now();
-    const context = await inputContext({ ...options, filename: absolutePath });
     const collector = new DiagnosticCollector(
-      context.filePath,
-      context.config.diagnostics,
+      options.filePath,
+      options.config.diagnostics,
     );
     collector.report({
       code: 'parse/invalid-encoding',
@@ -297,11 +334,7 @@ async function lintFileUsingParser(
     });
     return fileResult(collector, startedAt);
   }
-  return lintGeoJSONTextUsingParser(
-    text,
-    { ...options, filename: absolutePath },
-    parser,
-  );
+  return lintResolvedText(text, options);
 }
 
 export function lintFile(
