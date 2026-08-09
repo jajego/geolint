@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compareArtifacts } from '../benchmark/compare.js';
+import { compareArtifacts, validateArtifact } from '../benchmark/compare.js';
 import { createFixture } from '../benchmark/fixtures.js';
 import { median } from '../benchmark/metrics.js';
 import type {
   BenchmarkArtifact,
   BenchmarkCaseResult,
 } from '../benchmark/types.js';
+import { benchmarkGroups } from '../benchmark/types.js';
 
 function artifact(
   result: BenchmarkCaseResult = benchmark(100, 10, 100),
@@ -102,6 +103,49 @@ test('benchmark artifact validation rejects inconsistent sample data', () => {
       new RegExp(message),
     );
   }
+});
+
+test('benchmark artifact validation checks optional numeric metrics', () => {
+  const valid = artifact();
+  for (const [key, value] of [
+    ['megabytesPerSecond', '10'],
+    ['featuresPerSecond', Number.NaN],
+    ['verticesPerSecond', Infinity],
+    ['filesPerSecond', -1],
+    ['peakRssBytes', {}],
+  ] as const) {
+    assert.throws(
+      () =>
+        validateArtifact(
+          artifact({ ...benchmark(100, 10, 100), [key]: value }),
+        ),
+      new RegExp(`invalid ${key}`),
+    );
+  }
+  validateArtifact(artifact({ ...benchmark(100, 10, 100), filesPerSecond: 0 }));
+  validateArtifact(
+    artifact({
+      ...benchmark(100, 10, 100),
+      featuresPerSecond: 1,
+      verticesPerSecond: 2,
+    }),
+  );
+  validateArtifact(valid);
+});
+
+test('benchmark artifact validation derives groups from benchmarkGroups', () => {
+  for (const group of benchmarkGroups)
+    validateArtifact(artifact({ ...benchmark(100, 10, 100), group }));
+  assert.throws(
+    () =>
+      validateArtifact(
+        artifact({
+          ...benchmark(100, 10, 100),
+          group: 'unknown',
+        } as unknown as BenchmarkCaseResult),
+      ),
+    /unsupported group/,
+  );
 });
 
 test('benchmark environment compatibility uses CPU and Node major', () => {

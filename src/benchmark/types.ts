@@ -1,14 +1,17 @@
-export type BenchmarkGroup =
-  | 'product-lint'
-  | 'parser-strategy'
-  | 'source-aware'
-  | 'properties'
-  | 'hostile-inputs'
-  | 'diagnostics'
-  | 'batch'
-  | 'cold-start'
-  | 'memory'
-  | 'instrumentation';
+export const benchmarkGroups = [
+  'product-lint',
+  'parser-strategy',
+  'source-aware',
+  'properties',
+  'hostile-inputs',
+  'diagnostics',
+  'batch',
+  'cold-start',
+  'memory',
+  'instrumentation',
+] as const;
+
+export type BenchmarkGroup = (typeof benchmarkGroups)[number];
 
 export interface BenchmarkEnvironment {
   readonly node: string;

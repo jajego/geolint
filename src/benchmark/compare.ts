@@ -6,6 +6,7 @@ import type {
   BenchmarkComparison,
   BenchmarkEnvironment,
 } from './types.js';
+import { benchmarkGroups } from './types.js';
 import { median } from './metrics.js';
 
 export interface BenchmarkCaseIncompatibility {
@@ -19,18 +20,14 @@ interface EnvironmentCompatibility {
   readonly warnings: readonly string[];
 }
 
-const benchmarkGroups = new Set<string>([
-  'product-lint',
-  'parser-strategy',
-  'source-aware',
-  'properties',
-  'hostile-inputs',
-  'diagnostics',
-  'batch',
-  'cold-start',
-  'memory',
-  'instrumentation',
-]);
+const benchmarkGroupSet = new Set<string>(benchmarkGroups);
+const optionalNumericMetrics = [
+  'megabytesPerSecond',
+  'featuresPerSecond',
+  'verticesPerSecond',
+  'filesPerSecond',
+  'peakRssBytes',
+] as const;
 
 function invalid(label: string, message: string): never {
   throw new Error(`Invalid ${label} benchmark artifact: ${message}`);
@@ -122,6 +119,20 @@ function validateNumberRecord(value: unknown, label: string): void {
   }
 }
 
+function validateOptionalNonNegativeFiniteNumber(
+  value: Record<string, unknown>,
+  key: string,
+  label: string,
+): void {
+  if (
+    value[key] !== undefined &&
+    (typeof value[key] !== 'number' ||
+      !Number.isFinite(value[key]) ||
+      value[key] < 0)
+  )
+    invalid(label, `invalid ${key}.`);
+}
+
 function validateBenchmarkCase(
   value: unknown,
   index: number,
@@ -133,10 +144,12 @@ function validateBenchmarkCase(
   for (const key of ['id', 'fixture', 'profile', 'strategy'] as const)
     requiredString(item, key, caseLabel);
   const group = requiredString(item, 'group', caseLabel);
-  if (!benchmarkGroups.has(group)) invalid(caseLabel, 'unsupported group.');
+  if (!benchmarkGroupSet.has(group)) invalid(caseLabel, 'unsupported group.');
   const sourceBytes = requiredNumber(item, 'sourceBytes', caseLabel);
   if (sourceBytes < 0) invalid(caseLabel, 'sourceBytes must be non-negative.');
   validateSamples(item, caseLabel);
+  for (const key of optionalNumericMetrics)
+    validateOptionalNonNegativeFiniteNumber(item, key, caseLabel);
   if (
     item.workerCount !== undefined &&
     (typeof item.workerCount !== 'number' ||
