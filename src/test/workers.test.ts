@@ -307,15 +307,98 @@ test('snapshot worker count remains explicit and clamps to system parallelism', 
   assert.equal(snapshotWorkerCount(1_000, 100, 8), 8);
 });
 
-test('postMessage failures settle once and leave the worker scheduler alive', async () => {
-  let calls = 0;
+test('a permanent postMessage failure retires the slot and replacement drains the queue', async () => {
+  let created = 0;
+  let failedCalls = 0;
+  const workers: FakeWorker[] = [];
+  const pool = await WorkerPool.create(3, {
+    createWorker: () => {
+      created += 1;
+      const workerNumber = created;
+      const worker = new FakeWorker((item, current) => {
+        if (workerNumber === 1) {
+          failedCalls += 1;
+          throw new Error('transport permanently closed');
+        }
+        succeed(item, current, 5);
+      });
+      workers.push(worker);
+      return worker;
+    },
+  });
+  try {
+    const outcomes = await pool.run(
+      Array.from({ length: 7 }, (_, index) => task(index)),
+    );
+    assert.deepEqual(
+      outcomes.map((outcome) => outcome.type),
+      [
+        'error',
+        'snapshot-result',
+        'snapshot-result',
+        'snapshot-result',
+        'snapshot-result',
+        'snapshot-result',
+        'snapshot-result',
+      ],
+    );
+    assert.equal(failedCalls, 1);
+  } finally {
+    await pool.terminate();
+  }
+  assert.ok(workers.every((worker) => worker.terminated));
+});
+
+test('postMessage replacement failure leaves surviving workers to drain the queue', async () => {
+  let created = 0;
+  let failedCalls = 0;
+  const workers: FakeWorker[] = [];
+  const pool = await WorkerPool.create(3, {
+    createWorker: () => {
+      created += 1;
+      if (created === 4) throw new Error('replacement failed');
+      const workerNumber = created;
+      const worker = new FakeWorker((item, current) => {
+        if (workerNumber === 1) {
+          failedCalls += 1;
+          throw new Error('transport permanently closed');
+        }
+        succeed(item, current, 5);
+      });
+      workers.push(worker);
+      return worker;
+    },
+  });
+  try {
+    const outcomes = await pool.run(
+      Array.from({ length: 7 }, (_, index) => task(index)),
+    );
+    assert.equal(failedCalls, 1);
+    assert.equal(
+      outcomes.filter((outcome) => outcome.type === 'error').length,
+      1,
+    );
+    assert.equal(outcomes[0]?.type, 'error');
+    assert.ok(
+      outcomes.slice(1).every((outcome) => outcome.type === 'snapshot-result'),
+    );
+  } finally {
+    await pool.terminate();
+  }
+  assert.ok(workers.every((worker) => worker.terminated));
+});
+
+test('postMessage failure with no replacement settles the pending queue once', async () => {
+  let created = 0;
+  let failedCalls = 0;
   const workers: FakeWorker[] = [];
   const pool = await WorkerPool.create(1, {
     createWorker: () => {
-      const worker = new FakeWorker((item, current) => {
-        calls += 1;
-        if (calls === 2) throw new Error('dispatch failed');
-        succeed(item, current);
+      created += 1;
+      if (created === 2) throw new Error('replacement failed');
+      const worker = new FakeWorker(() => {
+        failedCalls += 1;
+        throw new Error('transport permanently closed');
       });
       workers.push(worker);
       return worker;
@@ -323,13 +406,10 @@ test('postMessage failures settle once and leave the worker scheduler alive', as
   });
   try {
     const outcomes = await pool.run([task(0), task(1), task(2)]);
+    assert.equal(failedCalls, 1);
     assert.deepEqual(
       outcomes.map((outcome) => outcome.type),
-      ['snapshot-result', 'error', 'snapshot-result'],
-    );
-    assert.equal(
-      outcomes[1]?.type === 'error' && outcomes[1].error.code,
-      'GEOLINT_WORKER_FAILURE',
+      ['error', 'error', 'error'],
     );
   } finally {
     await pool.terminate();

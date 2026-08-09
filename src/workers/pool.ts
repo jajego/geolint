@@ -165,14 +165,7 @@ export class WorkerPool {
         try {
           slot.worker.postMessage(task);
         } catch (error) {
-          slot.active = undefined;
-          complete(
-            internalError(
-              task,
-              `Could not dispatch Worker task: ${String(error)}`,
-            ),
-          );
-          dispatch(slot);
+          crash(slot, `Could not dispatch Worker task: ${String(error)}`);
         }
       };
       const failPendingIfUnusable = () => {
@@ -212,6 +205,7 @@ export class WorkerPool {
         if (slot.active) complete(internalError(slot.active, message));
         slot.active = undefined;
         slot.replacing = true;
+        void slot.worker.terminate().catch(() => undefined);
         void replace(slot);
       };
       const attach = (slot: Slot) => {
