@@ -30,7 +30,7 @@ Benchmark artifacts use schema version 1 independently of package semver:
 ```json
 {
   "schemaVersion": 1,
-  "geolintVersion": "0.0.0",
+  "geolintVersion": "1.0.0",
   "suite": "standard",
   "environment": {
     "node": "v26.5.1",
@@ -54,7 +54,7 @@ The suite covers 10k/100k/1m points, LineString, Polygon, nested mixed GeometryC
 
 Named profiles are `structural`, `recommended`, `source-precision`, `source-feature-bytes`, `source-combined`, `regression`, `snapshot-facts`, and `high-cardinality-failure`. A three-plugin-coordinate-hook case measures dispatch while asserting one coordinate traversal and exactly three callbacks per Position.
 
-## Phase 10 baseline and findings
+## Single-threaded performance
 
 Measurements below were collected on Node v26.5.1, Windows x64, an Intel i9-9900K. They characterize this machine only.
 
@@ -88,7 +88,7 @@ Many tiny Features were roughly 10.6 times slower than one huge Feature at the s
 
 Diagnostic floods remained bounded: 100k coordinate failures retained 2 diagnostics and suppressed 99,998; 10k missing IDs retained 2 and suppressed 9,998; 9,999 duplicate-ID findings retained 2; and 10k Feature-budget findings retained 2.
 
-Sequential regression throughput was 345.6 files/s for 10 medium files and 1,455.0 files/s for 100 small files. The baseline is single-threaded and exists for Phase 11 comparison.
+Sequential regression throughput was 345.6 files/s for 10 medium files and 1,455.0 files/s for 100 small files. These are the single-threaded reference measurements.
 
 Peak RSS measured 55.2 MiB at 10k buffered points, 73.9 MiB at 100k, and 257.0 MiB at 1m. Indexed semantic-only 1m peaked at 162.3 MiB and indexed source-precision at 163.5 MiB, but both were much slower. A huge 100k-vertex Feature peaked at 80.6 MiB, 100k tiny Features at 185.0 MiB, and the indexed losing duplicate at 66.3 MiB. These measurements show input- and policy-dependent growth, not an asymptotic guarantee.
 
@@ -104,11 +104,11 @@ No indexed-parser, scanner, rule-dispatch, diagnostic, or planner optimization w
 
 Timing varies with CPU frequency, background work, Node/V8 version, operating system, and GC history. Compare artifacts from the same platform, architecture, Node major version, and CPU model; CPU-count and memory warnings provide additional runner context. Initial thresholds are advisory until CI variance is characterized. Correctness and instrumentation invariants remain hard failures.
 
-Cross-process caches, stdin spooling, parser rewrites, and hard timing gates are deferred to their designated later phases.
+Cross-process caches, stdin spooling, parser rewrites, and hard timing gates are not part of the current package.
 
-## Phase 11 worker feasibility decision
+## Worker parallelism
 
-Phase 11A used a benchmark-only persistent `node:worker_threads` pool with one file per task. The main thread resolved configuration, per-file overrides, target identity, and regression baseline entries; workers received file paths and pure data, read files themselves, and executed built-in rules. Each isolated result used one untimed warmup followed by three or five measured invocations including pool startup and termination. Worker-ready, first-task, steady execution, total wall time, and process RSS were recorded separately.
+Worker measurements use a persistent `node:worker_threads` pool with one file per task. The main thread resolves configuration, per-file overrides, target identity, and regression baseline entries; workers receive file paths and pure data, read files themselves, and execute built-in rules. Each isolated result uses one untimed warmup followed by three or five measured invocations including pool startup and termination. Worker-ready, first-task, steady execution, total wall time, and process RSS are recorded separately.
 
 On Node v26.5.1, Windows x64, an Intel i9-9900K with 16 available logical CPUs, median results were:
 
@@ -125,11 +125,11 @@ On Node v26.5.1, Windows x64, an Intel i9-9900K with 16 available logical CPUs, 
 
 Pool readiness was roughly 62–78 ms at one to four workers and 92–114 ms at eight. A repeat run reproduced eight source-aware files at 7,901 ms sequential versus 2,612 ms with four workers (3.02×), and eight buffered files at 1,828 ms versus 818 ms (2.24×). The 100-small-file regression also reproduced.
 
-**Decision: GO.** Multiple realistic generated artifacts of roughly 9 MB each show repeatable 2–3× wall-clock improvement at four workers. Source-aware work gains the most while remaining below 400 MiB RSS in the measured four-worker case. Cheap and medium batches become slower, and buffered memory can exceed 1 GiB, so Phase 11B must retain strict single-thread execution for `workers=1` and use a conservative automatic threshold. One huge GeoJSON file cannot benefit because work is parallelized only across files.
+These measurements show repeatable wall-clock improvements for sufficiently large multi-file workloads at four workers. Source-aware work gains the most in the measured cases. Cheap and medium batches become slower, and buffered memory can exceed 1 GiB, so GeoLint keeps `workers=1` strictly single-threaded and uses a conservative automatic threshold. One huge GeoJSON file cannot benefit because work is parallelized only across files.
 
-### Production worker validation
+### Production measurements
 
-The final pool adds versioned task messages, explicit error envelopes, plugin reload/identity validation and caching, crash replacement, ordered settlement, and snapshot tasks. Its one-to-four-worker readiness cost was about 101–145 ms. The complete production results retained the feasibility win:
+The production pool uses versioned task messages, explicit error envelopes, plugin reload/identity validation and caching, crash replacement, ordered settlement, and snapshot tasks. Its one-to-four-worker readiness cost was about 101–145 ms. The measured results retain the large-workload benefit:
 
 | Workload                   | Main thread |  2 workers |  4 workers |  8 workers | 4-worker speedup | 4-worker RSS |
 | -------------------------- | ----------: | ---------: | ---------: | ---------: | ---------------: | -----------: |

@@ -1,14 +1,22 @@
 import assert from 'node:assert/strict';
 import { execFile, spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { geolintVersion } from '../version.js';
+
 const execFileAsync = promisify(execFile);
 const cliPath = fileURLToPath(new URL('../cli/index.js', import.meta.url));
+const packageVersion = (
+  createRequire(import.meta.url)('../../package.json') as {
+    readonly version: string;
+  }
+).version;
 
 async function run(args: readonly string[], cwd?: string) {
   return execFileAsync(process.execPath, [cliPath, ...args], { cwd });
@@ -30,14 +38,15 @@ function runResult(
   };
 }
 
-test('CLI help and version use the public command contract', async () => {
+test('CLI version derives from package metadata', async () => {
   const { stdout, stderr } = await run(['--help']);
 
   assert.equal(stderr, '');
   assert.match(stdout, /--print-config <file>/);
   assert.match(stdout, /snapshot \[targets\.\.\.\]/);
+  assert.equal(geolintVersion, packageVersion);
   assert.deepEqual(await run(['--version']), {
-    stdout: 'geolint 0.0.0\n',
+    stdout: `geolint ${packageVersion}\n`,
     stderr: '',
   });
 });
@@ -192,7 +201,7 @@ test('no-config pretty and JSON flows lint the actual built CLI', async () => {
     assert.equal(machine.stderr, '');
     const result = JSON.parse(machine.stdout);
     assert.equal(result.schemaVersion, 1);
-    assert.equal(result.geolintVersion, '0.0.0');
+    assert.equal(result.geolintVersion, geolintVersion);
     assert.equal(result.errorCount, 1);
     assert.equal(result.files[0].diagnostics[0].code, 'valid-coordinate-range');
   } finally {

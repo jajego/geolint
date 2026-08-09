@@ -8,6 +8,7 @@ import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
 import type { SnapshotProposal } from '../regression/snapshot.js';
 import type { BaselineFileEntry } from '../regression/schema.js';
+import { geolintVersion } from '../version.js';
 
 function entry(overrides: Partial<BaselineFileEntry> = {}): BaselineFileEntry {
   return {
@@ -42,7 +43,7 @@ test('JSON reporter preserves Maps and versioned result data', async () => {
   );
   const parsed = JSON.parse(formatJson(createLintResult([file], 0)));
   assert.equal(parsed.schemaVersion, 1);
-  assert.equal(parsed.geolintVersion, '0.0.0');
+  assert.equal(parsed.geolintVersion, geolintVersion);
   assert.equal(parsed.files[0].summary.propertyStats.name.present, 1);
   assert.equal(parsed.files[0].summary.featureGeometryTypes.Point, 1);
   assert.equal(JSON.stringify(parsed).includes('\u001b['), false);

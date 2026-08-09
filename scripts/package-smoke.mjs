@@ -8,6 +8,9 @@ const repository = resolve(import.meta.dirname, '..');
 const npm = process.env.npm_execpath;
 assert.ok(npm, 'npm_execpath is required.');
 const tsc = resolve(repository, 'node_modules', 'typescript', 'bin', 'tsc');
+const packageVersion = JSON.parse(
+  await readFile(join(repository, 'package.json'), 'utf8'),
+).version;
 
 function run(command, args, cwd, expected = [0]) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8' });
@@ -93,6 +96,12 @@ try {
     ['install', tarball, '--ignore-scripts', '--no-audit', '--no-fund'],
     consumer,
   );
+  assert.equal(
+    JSON.parse(
+      await readFile(join(consumer, 'node_modules', 'geolint', 'package.json')),
+    ).version,
+    packageVersion,
+  );
 
   const valid = { type: 'Point', coordinates: [0, 0] };
   const quality = {
@@ -119,7 +128,10 @@ try {
   );
   assert.match(invalidResult.stdout, /parse\/invalid-json/);
   assert.match(runCli(['--help'], consumer).stdout, /Usage: geolint/);
-  assert.match(runCli(['--version'], consumer).stdout, /^geolint 0\.0\.0/m);
+  assert.equal(
+    runCli(['--version'], consumer).stdout,
+    `geolint ${packageVersion}\n`,
+  );
   assert.match(
     runCli(['--format', 'unsupported'], consumer, [2]).stderr,
     /GEOLINT_CLI_ERROR/,

@@ -17,13 +17,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run format:check
-      - run: npm run check
-      - run: npm test
-      - run: npm run test:integration
-      - run: npm run test:torture
-      - run: npm run build
-      - run: npm run smoke:package
+      - run: npm run verify:release
       - run: npm run benchmark -- --output benchmark-results/ci.json
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Linux'

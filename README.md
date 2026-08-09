@@ -10,6 +10,18 @@ GeoLint is not a topology engine, geometry repair tool, spatial database, or rep
 npx geolint map.geojson
 ```
 
+For a duplicate Feature ID, the default reporter looks like this:
+
+```text
+map.geojson
+
+  id "same"  error  Feature ID is duplicated.  unique-feature-id
+
+  2 features · 2 vertexs · 233 B · 2 ms
+
+✖ 1 error, 0 warnings
+```
+
 For repeatable local and CI use:
 
 ```sh

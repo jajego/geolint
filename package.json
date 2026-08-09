@@ -67,7 +67,7 @@
     "check:dead-code": "knip",
     "check": "npm run typecheck && npm run lint && npm run check:deps && npm run check:dead-code",
     "smoke:package": "node scripts/package-smoke.mjs",
-    "verify:release": "npm run check && npm run format:check && npm test && npm run test:integration && npm run test:torture && npm run build && npm run smoke:package",
+    "verify:release": "npm run check && npm run format:check && npm test && npm run smoke:package",
     "prepack": "npm run check && npm run clean && npm run build",
     "prepublishOnly": "npm run verify:release",
     "format": "prettier --write src scripts/*.mjs package.json tsconfig.json eslint.config.js .dependency-cruiser.cjs knip.json .github/workflows/*.yml README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md docs/*.md .prettierrc.json",

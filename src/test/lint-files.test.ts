@@ -8,6 +8,7 @@ import { definePlugin } from '../plugins/plugin.js';
 import { defineRule } from '../rules/define-rule.js';
 import { GeoLintBatchError } from '../engine/errors.js';
 import { executeLintFiles, lintFiles } from '../engine/lint-files.js';
+import { geolintVersion } from '../version.js';
 
 test('lintFiles resolves a deterministic batch and aggregates logical counts', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geolint-batch-'));
@@ -30,7 +31,7 @@ test('lintFiles resolves a deterministic batch and aggregates logical counts', a
       ['a.geojson', 'b.geojson'],
     );
     assert.equal(result.schemaVersion, 1);
-    assert.equal(result.geolintVersion, '0.0.0');
+    assert.equal(result.geolintVersion, geolintVersion);
     assert.equal(result.errorCount, 0);
     assert.equal(result.warningCount, 1);
     assert.equal(result.suppressedDiagnosticCount, 0);
