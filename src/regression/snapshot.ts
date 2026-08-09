@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
 
-import { resolveTargets } from '../cli/targets.js';
+import { resolveTargets } from '../engine/targets.js';
 import { resolveRuntimeConfig } from '../config/runtime.js';
 import { DiagnosticCollector } from '../engine/diagnostics.js';
 import {

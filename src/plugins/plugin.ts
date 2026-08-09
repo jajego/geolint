@@ -1,5 +1,5 @@
 import { GeoLintConfigError } from '../engine/errors.js';
-import { validateConfig } from '../config/validate.js';
+import { validatePolicyConfig } from '../config/validate-policy.js';
 import type { RuleDefinition } from '../rules/define-rule.js';
 import type { GeoLintConfigFragment } from '../types/config.js';
 import type { SummaryFactName } from '../types/semantic.js';
@@ -208,7 +208,7 @@ function validatePluginConfigFragment(value: unknown, path: string): void {
   const fragment = plainRecord(value, path);
   knownKeys(fragment, fragmentKeys, path);
   try {
-    validateConfig(fragment);
+    validatePolicyConfig(fragment, 'config');
   } catch (error) {
     if (error instanceof GeoLintConfigError) {
       throw new GeoLintConfigError(

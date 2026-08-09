@@ -15,7 +15,7 @@ import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
 import { geolintVersion } from '../version.js';
 import { parseCliArguments, type CliArguments } from './args.js';
-import { resolveTargets } from './targets.js';
+import { resolveTargets } from '../engine/targets.js';
 
 export interface CliOutput {
   readonly exitCode: 0 | 1 | 2;

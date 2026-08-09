@@ -22,6 +22,8 @@ export const propertyTypeOrder = Object.freeze([
   'array',
   'object',
 ] as const satisfies readonly JsonValueType[]);
+const geometryTypes = new Set<string>(geometryTypeOrder);
+const propertyTypes = new Set<string>(propertyTypeOrder);
 
 const packageVersion = (
   createRequire(import.meta.url)('../../package.json') as { version: string }
@@ -123,7 +125,7 @@ function parseProperty(value: unknown, path: string): BaselinePropertyEntry {
   const types = {} as Partial<Record<JsonValueType, number>>;
   let observed = 0;
   for (const type of Object.keys(rawTypes)) {
-    if (!propertyTypeOrder.includes(type as JsonValueType)) {
+    if (!propertyTypes.has(type)) {
       invalid(`${path}.types.${type}`, 'a supported coarse property type');
     }
   }
@@ -131,7 +133,7 @@ function parseProperty(value: unknown, path: string): BaselinePropertyEntry {
     const valueCount = rawTypes[type];
     if (valueCount === undefined) continue;
     const parsed = count(valueCount, `${path}.types.${type}`, true);
-    types[type as JsonValueType] = parsed;
+    types[type] = parsed;
     observed += parsed;
   }
   if (Object.keys(types).length === 0) invalid(`${path}.types`, 'non-empty');
@@ -177,7 +179,7 @@ function parseEntry(value: unknown, path: string): BaselineFileEntry {
   >;
   let geometryCount = 0;
   for (const type of Object.keys(geometry)) {
-    if (!geometryTypeOrder.includes(type as GeoJSONGeometryType)) {
+    if (!geometryTypes.has(type)) {
       invalid(
         `${path}.featureGeometryTypes.${type}`,
         'a GeoJSON geometry type',

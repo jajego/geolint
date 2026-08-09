@@ -10,6 +10,25 @@ import {
 } from '../engine/errors.js';
 import type { WorkerErrorEnvelope } from './protocol.js';
 
+type GeoLintErrorConstructor = new (
+  message: string,
+  code: string,
+  options?: ErrorOptions,
+) => GeoLintError;
+
+const errorClasses = {
+  GeoLintCapabilityError,
+  GeoLintConfigError,
+  GeoLintInputError,
+  GeoLintTargetError,
+  GeoLintIOError,
+  GeoLintInternalError,
+} satisfies Readonly<Record<string, GeoLintErrorConstructor>>;
+
+function isKnownErrorName(name: string): name is keyof typeof errorClasses {
+  return Object.hasOwn(errorClasses, name);
+}
+
 export function deserializeWorkerError(
   error: WorkerErrorEnvelope,
 ): GeoLintError {
@@ -25,18 +44,9 @@ export function deserializeWorkerError(
     if (error.stack) value.stack = error.stack;
     return value;
   }
-  const ErrorClass =
-    error.name === 'GeoLintCapabilityError'
-      ? GeoLintCapabilityError
-      : error.name === 'GeoLintConfigError'
-        ? GeoLintConfigError
-        : error.name === 'GeoLintInputError'
-          ? GeoLintInputError
-          : error.name === 'GeoLintTargetError'
-            ? GeoLintTargetError
-            : error.name === 'GeoLintIOError'
-              ? GeoLintIOError
-              : GeoLintInternalError;
+  const ErrorClass = isKnownErrorName(error.name)
+    ? errorClasses[error.name]
+    : GeoLintInternalError;
   const value = new ErrorClass(error.message, error.code, options);
   if (error.stack) value.stack = error.stack;
   return value;

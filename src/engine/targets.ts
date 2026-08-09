@@ -4,7 +4,7 @@ import fg from 'fast-glob';
 
 import { assertGlob, matchesGlob, normalizePath } from '../config/glob.js';
 import { normalizeFilePath, resolveFileConfig } from '../config/resolve.js';
-import { GeoLintTargetError } from '../engine/errors.js';
+import { GeoLintTargetError } from './errors.js';
 import type { ResolvedConfig, ResolvedFileConfig } from '../types/config.js';
 
 export type ResolvedTarget =

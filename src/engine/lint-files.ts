@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
 
-import { resolveTargets, type ResolvedTarget } from '../cli/targets.js';
+import { resolveTargets, type ResolvedTarget } from './targets.js';
 import {
   resolveRuntimeConfig,
   type ConfigRuntimeOptions,

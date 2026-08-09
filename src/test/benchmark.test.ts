@@ -86,6 +86,24 @@ test('benchmark comparison validates schema and basic artifact structure', () =>
   }
 });
 
+test('benchmark artifact validation rejects inconsistent sample data', () => {
+  const valid = artifact();
+  for (const [result, message] of [
+    [{ ...benchmark(100, 10, 100), sampleCount: 2 }, 'samplesMs'],
+    [{ ...benchmark(100, 10, 100), samplesMs: [Number.NaN] }, 'samplesMs'],
+    [{ ...benchmark(100, 10, 100), medianMs: 99 }, 'timing summaries'],
+    [
+      { ...benchmark(100, 10, 100), semanticCounts: { features: -1 } },
+      'features',
+    ],
+  ] as const) {
+    assert.throws(
+      () => compareArtifacts(artifact(result as BenchmarkCaseResult), valid),
+      new RegExp(message),
+    );
+  }
+});
+
 test('benchmark environment compatibility uses CPU and Node major', () => {
   const baseline = artifact();
   const compatible = changed(baseline, {

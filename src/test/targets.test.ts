@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { resolveTargets } from '../cli/targets.js';
+import { resolveTargets } from '../engine/targets.js';
 import { matchesGlob } from '../config/glob.js';
 import { resolveConfig } from '../config/resolve.js';
 import { GeoLintTargetError } from '../engine/errors.js';
