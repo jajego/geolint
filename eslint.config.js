@@ -18,10 +18,7 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': [
-        'error',
-        { checksVoidReturn: { arguments: false } },
-      ],
+      '@typescript-eslint/no-misused-promises': 'error',
       'no-nested-ternary': 'error',
     },
   },
@@ -37,8 +34,26 @@ export default tseslint.config(
     },
   },
   {
-    // Parser/scanner and benchmark measurement hot paths keep compact branches.
-    files: ['src/{benchmark,parser,scanner}/**/*.ts'],
+    // Frozen parser/scanner and measurement hot paths retain compact branches.
+    files: [
+      'src/benchmark/fixtures.ts',
+      'src/benchmark/worker-feasibility.ts',
+      'src/parser/indexed-source.ts',
+      'src/scanner/scan.ts',
+    ],
     rules: { 'no-nested-ternary': 'off' },
+  },
+  {
+    // EventEmitter owns these async worker lifecycle callbacks.
+    files: [
+      'src/workers/worker-entry.ts',
+      'src/benchmark/worker-prototype-entry.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        { checksVoidReturn: { arguments: false } },
+      ],
+    },
   },
 );
