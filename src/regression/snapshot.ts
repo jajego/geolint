@@ -19,6 +19,9 @@ import type {
   JsonValueType,
   SummaryFactName,
 } from '../types/semantic.js';
+import { deserializeWorkerError } from '../workers/errors.js';
+import { WorkerPool } from '../workers/pool.js';
+import type { WorkerSnapshotTask } from '../workers/protocol.js';
 import {
   loadBaseline,
   regressionIdentity,
@@ -65,6 +68,7 @@ export interface SnapshotOptions extends ConfigRuntimeOptions {
   readonly targets?: readonly string[];
   readonly baselinePath?: string;
   readonly noIgnore?: boolean;
+  readonly workers?: number;
 }
 
 function complete(summary: FileSummary): boolean {
@@ -130,7 +134,7 @@ export function baselineEntryFromSummary(
   };
 }
 
-async function capture(
+export async function captureSnapshotFile(
   absolutePath: string,
   filePath: string,
 ): Promise<BaselineFileEntry> {
@@ -239,9 +243,36 @@ export async function snapshotBaseline(
     : resolveBaselinePath(config);
   const before = await loadBaseline(baselinePath);
   const captured = Object.create(null) as Record<string, BaselineFileEntry>;
-  for (const target of targets) {
-    const identity = regressionIdentity(target.filePath);
-    captured[identity] = await capture(target.absolutePath, identity);
+  const workerCount = Math.min(options.workers ?? 1, targets.length);
+  if (workerCount > 1) {
+    const tasks = targets.map((target, taskId): WorkerSnapshotTask => ({
+      protocolVersion: 1,
+      type: 'snapshot',
+      taskId,
+      absolutePath: target.absolutePath,
+      filePath: regressionIdentity(target.filePath),
+    }));
+    const pool = await WorkerPool.create(workerCount);
+    try {
+      const outcomes = await pool.run(tasks);
+      for (const outcome of outcomes) {
+        if (outcome.type === 'error')
+          throw deserializeWorkerError(outcome.error);
+        if (outcome.type === 'snapshot-result') {
+          captured[tasks[outcome.taskId]!.filePath] = outcome.result;
+        }
+      }
+    } finally {
+      await pool.terminate();
+    }
+  } else {
+    for (const target of targets) {
+      const identity = regressionIdentity(target.filePath);
+      captured[identity] = await captureSnapshotFile(
+        target.absolutePath,
+        identity,
+      );
+    }
   }
   const files = mode === 'full' ? captured : { ...before.files, ...captured };
   const after = createBaseline(files);

@@ -16,6 +16,7 @@ export interface CliArguments {
   readonly parser: 'auto' | 'buffered' | 'indexed';
   readonly stdinFilename?: string;
   readonly debug: boolean;
+  readonly workers?: number;
 }
 
 function invalid(message: string): never {
@@ -40,6 +41,7 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
       'print-config': { type: 'string' },
       'stdin-filename': { type: 'string' },
       version: { type: 'boolean', short: 'v' },
+      workers: { type: 'string' },
     },
   });
   if (values.config && values['no-config']) {
@@ -62,6 +64,14 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
     if (!Number.isSafeInteger(maxWarnings)) {
       invalid('--max-warnings must be a non-negative safe integer.');
     }
+  }
+  let workers: number | undefined;
+  if (values.workers !== undefined) {
+    if (!/^[1-9]\d*$/.test(values.workers))
+      invalid('--workers must be a positive integer.');
+    workers = Number(values.workers);
+    if (!Number.isSafeInteger(workers))
+      invalid('--workers must be a positive safe integer.');
   }
   const command = values.help
     ? 'help'
@@ -101,5 +111,6 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
       ? { stdinFilename: values['stdin-filename'] }
       : {}),
     debug: values.debug ?? false,
+    ...(workers === undefined ? {} : { workers }),
   };
 }

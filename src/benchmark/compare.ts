@@ -83,6 +83,13 @@ export function validateArtifact(
       (item.medianMs as number) <= 0
     )
       invalid(label, `case ${index} has unusable timing metadata.`);
+    if (
+      item.workerCount !== undefined &&
+      (typeof item.workerCount !== 'number' ||
+        !Number.isSafeInteger(item.workerCount) ||
+        item.workerCount < 0)
+    )
+      invalid(label, `case ${index} has invalid workerCount.`);
     if (ids.has(item.id as string))
       invalid(label, `duplicate case ID ${item.id}.`);
     ids.add(item.id as string);
@@ -144,6 +151,8 @@ function caseReasons(
   ] as const) {
     if (baseline[key] !== current[key]) reasons.push(`${key} differs`);
   }
+  if (baseline.workerCount !== current.workerCount)
+    reasons.push('workerCount differs');
   const keys = new Set([
     ...Object.keys(baseline.semanticCounts ?? {}),
     ...Object.keys(current.semanticCounts ?? {}),

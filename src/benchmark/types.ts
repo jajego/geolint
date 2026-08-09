@@ -25,6 +25,7 @@ export interface BenchmarkCaseResult {
   readonly fixture: string;
   readonly profile: string;
   readonly strategy: string;
+  readonly workerCount?: number;
   readonly sourceBytes: number;
   readonly sampleCount: number;
   readonly samplesMs: readonly number[];

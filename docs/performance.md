@@ -104,4 +104,44 @@ No indexed-parser, scanner, rule-dispatch, diagnostic, or planner optimization w
 
 Timing varies with CPU frequency, background work, Node/V8 version, operating system, and GC history. Compare artifacts from the same platform, architecture, Node major version, and CPU model; CPU-count and memory warnings provide additional runner context. Initial thresholds are advisory until CI variance is characterized. Correctness and instrumentation invariants remain hard failures.
 
-Workers, worker-pool heuristics, cross-process caches, stdin spooling, parser rewrites, and hard timing gates are deferred to their designated later phases.
+Cross-process caches, stdin spooling, parser rewrites, and hard timing gates are deferred to their designated later phases.
+
+## Phase 11 worker feasibility decision
+
+Phase 11A used a benchmark-only persistent `node:worker_threads` pool with one file per task. The main thread resolved configuration, per-file overrides, target identity, and regression baseline entries; workers received file paths and pure data, read files themselves, and executed built-in rules. Each isolated result used one untimed warmup followed by three or five measured invocations including pool startup and termination. Worker-ready, first-task, steady execution, total wall time, and process RSS were recorded separately.
+
+On Node v26.5.1, Windows x64, an Intel i9-9900K with 16 available logical CPUs, median results were:
+
+| Workload                   | Main thread |   1 worker |  2 workers |  4 workers |  8 workers | Main RSS | 4-worker RSS |
+| -------------------------- | ----------: | ---------: | ---------: | ---------: | ---------: | -------: | -----------: |
+| 100 small files            |     27.6 ms |   112.2 ms |    91.9 ms |    92.0 ms |   114.5 ms | 56.5 MiB |    134.7 MiB |
+| 10 medium files            |    111.8 ms |   247.3 ms |   177.7 ms |   171.8 ms |   257.2 ms | 98.0 MiB |    314.8 MiB |
+| 4 large buffered files     |    891.2 ms |   853.7 ms |   568.4 ms |   441.4 ms |   430.0 ms |  473 MiB |      917 MiB |
+| 8 large buffered files     |  1,549.5 ms | 1,597.3 ms |   966.9 ms |   801.5 ms |   723.0 ms |  399 MiB |    1,247 MiB |
+| 4 large source-aware files |  3,892.2 ms | 4,138.2 ms | 2,205.8 ms | 1,301.4 ms | 1,337.1 ms |  207 MiB |      341 MiB |
+| 8 large source-aware files |  7,870.7 ms | 8,139.4 ms | 4,487.1 ms | 2,509.5 ms | 2,204.1 ms |  144 MiB |      379 MiB |
+| 4 Feature-heavy files      |    684.1 ms |   788.7 ms |   462.4 ms |   430.1 ms |   485.7 ms |  293 MiB |      520 MiB |
+| 10-file regression batch   |    113.4 ms |   226.5 ms |   161.3 ms |   183.9 ms |   237.5 ms |  104 MiB |      327 MiB |
+
+Pool readiness was roughly 62–78 ms at one to four workers and 92–114 ms at eight. A repeat run reproduced eight source-aware files at 7,901 ms sequential versus 2,612 ms with four workers (3.02×), and eight buffered files at 1,828 ms versus 818 ms (2.24×). The 100-small-file regression also reproduced.
+
+**Decision: GO.** Multiple realistic generated artifacts of roughly 9 MB each show repeatable 2–3× wall-clock improvement at four workers. Source-aware work gains the most while remaining below 400 MiB RSS in the measured four-worker case. Cheap and medium batches become slower, and buffered memory can exceed 1 GiB, so Phase 11B must retain strict single-thread execution for `workers=1` and use a conservative automatic threshold. One huge GeoJSON file cannot benefit because work is parallelized only across files.
+
+### Production worker validation
+
+The final pool adds versioned task messages, explicit error envelopes, plugin reload/identity validation and caching, crash replacement, ordered settlement, and snapshot tasks. Its one-to-four-worker readiness cost was about 101–145 ms. The complete production results retained the feasibility win:
+
+| Workload                   | Main thread |  2 workers |  4 workers |  8 workers | 4-worker speedup | 4-worker RSS |
+| -------------------------- | ----------: | ---------: | ---------: | ---------: | ---------------: | -----------: |
+| 100 small files            |     25.1 ms |   135.0 ms |   133.8 ms |   163.6 ms |            0.19× |      146 MiB |
+| 10 medium files            |    108.7 ms |   212.5 ms |   214.8 ms |   286.3 ms |            0.51× |      324 MiB |
+| 4 large buffered files     |    756.2 ms |   590.6 ms |   443.4 ms |   527.5 ms |            1.71× |      918 MiB |
+| 8 large buffered files     |  1,483.7 ms | 1,016.8 ms |   789.5 ms |   813.0 ms |            1.88× |    1,164 MiB |
+| 4 large source-aware files |  3,866.6 ms | 2,254.2 ms | 1,475.2 ms | 1,560.5 ms |            2.62× |      349 MiB |
+| 8 large source-aware files |  8,032.6 ms | 4,205.4 ms | 2,555.5 ms | 2,097.9 ms |            3.14× |      388 MiB |
+| 4 Feature-heavy files      |    667.0 ms |   520.7 ms |   372.8 ms |   411.2 ms |            1.79× |      494 MiB |
+| 10-file regression batch   |    113.6 ms |   204.0 ms |   205.5 ms |   264.5 ms |            0.55× |      333 MiB |
+
+Eight large snapshot inputs measured 1,460.9 ms sequentially, 919.2 ms with two workers, 720.4 ms with four, and 683.7 ms with eight. Four workers used 1,336 MiB versus 479 MiB sequentially, so snapshot parallelism is available when explicitly requested but is not selected automatically.
+
+Automatic lint scheduling uses at most four workers and requires at least four file targets averaging at least 5 MB each, sufficient available parallelism, no stdin, and only reloadable plugins. Everything else stays on the main thread. Explicit `--workers 1` is always strictly sequential; explicit higher counts override the workload threshold but not stdin or plugin capability constraints. Worker benchmark artifacts record architecture, execution mode, and worker count as workload identity.

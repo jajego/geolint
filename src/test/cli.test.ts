@@ -74,6 +74,59 @@ test('snapshot command writes a baseline and prints its proposal', async () => {
   }
 });
 
+test('built CLI workers preserve JSON stdout and reload configured plugins', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geolint-cli-workers-'));
+  const pluginUrl = new URL('./fixtures/worker-plugin.js', import.meta.url)
+    .href;
+  try {
+    await Promise.all(
+      ['a.geojson', 'b.geojson'].map((name) =>
+        writeFile(
+          join(root, name),
+          JSON.stringify({
+            type: 'Feature',
+            properties: { secret: true },
+            geometry: { type: 'Point', coordinates: [0, 0] },
+          }),
+        ),
+      ),
+    );
+    await writeFile(
+      join(root, 'geolint.config.mjs'),
+      `import plugin from ${JSON.stringify(pluginUrl)};
+export default {
+  plugins: { worker: plugin },
+  rules: {
+    'worker/property-required': ['error', { key: 'missing' }],
+    'worker/noisy': 'error',
+  },
+};
+`,
+    );
+    const result = runResult(
+      [
+        '--config',
+        'geolint.config.mjs',
+        '--workers',
+        '2',
+        '--format',
+        'json',
+        '--debug',
+        '*.geojson',
+      ],
+      { cwd: root },
+    );
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stdout).files.length, 2);
+    assert.doesNotMatch(result.stdout, /GeoLint debug/);
+    assert.doesNotMatch(result.stdout, /worker stdout noise/);
+    assert.match(result.stderr, /effective workers: 2/);
+    assert.doesNotMatch(result.stderr, /worker stderr noise/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('no-config pretty and JSON flows lint the actual built CLI', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geolint-cli-product-'));
   try {

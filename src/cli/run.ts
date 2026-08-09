@@ -42,6 +42,7 @@ Options:
   --no-color               Disable ANSI color
   --stdin-filename <path>  Give stdin a stable project-relative identity
   --debug                   Write operational detail to stderr
+  --workers <n>             Set maximum per-file worker concurrency
   -h, --help               Show help
   -v, --version            Show the package version
 
@@ -78,6 +79,7 @@ function runtimeOptions(args: CliArguments): BatchExecutionOptions {
     parser: args.parser,
     ...(args.stdinFilename ? { stdinFilename: args.stdinFilename } : {}),
     ...(args.baseline ? { baselinePath: args.baseline } : {}),
+    ...(args.workers === undefined ? {} : { workers: args.workers }),
   };
 }
 
@@ -118,6 +120,7 @@ async function snapshot(args: CliArguments): Promise<CliOutput> {
     ...(args.targets.length === 0 ? {} : { targets: args.targets }),
     ...(args.baseline ? { baselinePath: args.baseline } : {}),
     ...(args.noIgnore ? { noIgnore: true } : {}),
+    ...(args.workers === undefined ? {} : { workers: args.workers }),
   });
   return {
     exitCode: 0,

@@ -16,6 +16,12 @@ npx geolint --print-config public/map.geojson
 npx geolint snapshot
 ```
 
+## Workers
+
+GeoLint can parallelize separate files with native Worker threads. Automatic mode is deliberately conservative: it uses at most four workers only for batches of at least four files averaging at least 5 MB each. One large GeoJSON file is never split and receives no worker speedup.
+
+Use `--workers 1` for strict main-thread execution or `--workers N` to set an explicit maximum. Reloadable plugins declare `moduleUrl` and `exportName`; automatic mode falls back to the main thread for inline plugins, while an explicit count above one reports a capability error. Snapshot workers are used only when explicitly requested. Programmatic `lintFiles()` uses automatic scheduling internally without adding a public worker-count option.
+
 ## Plugins
 
 External rules use the same synchronous semantic hooks and option schemas as
