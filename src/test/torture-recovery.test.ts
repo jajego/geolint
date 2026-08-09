@@ -6,7 +6,10 @@ import test from 'node:test';
 
 import { createBaseline, serializeBaseline } from '../regression/schema.js';
 import type { GeoLintConfig } from '../types/config.js';
-import { assertOrdinaryEquivalence } from './torture-harness.js';
+import {
+  assertOrdinaryEquivalence,
+  stableProjectedExecution,
+} from './torture-harness.js';
 
 const recoveryConfig: GeoLintConfig = {
   extends: ['geolint/recommended'],
@@ -181,15 +184,19 @@ test('numeric, categorical, no-baseline, and incomplete regression remain equiva
 
 test('repeated hostile execution is deeply deterministic', async () => {
   const source = recoveryCases[3]![1];
-  const runs = await Promise.all(
-    Array.from({ length: 5 }, async () => {
-      await assertOrdinaryEquivalence({
-        fixture: 'repeatability',
-        source,
-        config: recoveryConfig,
-      });
-      return JSON.parse(source);
-    }),
-  );
-  for (const run of runs.slice(1)) assert.deepEqual(run, runs[0]);
+  for (const parser of ['buffered', 'indexed'] as const) {
+    const runs = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        stableProjectedExecution(
+          {
+            fixture: `repeatability ${parser}`,
+            source,
+            config: recoveryConfig,
+          },
+          parser,
+        ),
+      ),
+    );
+    for (const run of runs.slice(1)) assert.deepEqual(run, runs[0]);
+  }
 });

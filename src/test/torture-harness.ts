@@ -94,12 +94,20 @@ function sourceProjection(result: FileLintResult): unknown {
   return stable;
 }
 
-function trace(source: string, indexed: boolean): readonly unknown[] {
+function trace(
+  source: string,
+  indexed: boolean,
+  sourceBacked = false,
+): readonly unknown[] {
   const events: unknown[] = [];
   const listener: SemanticListener = {
     featureStart({ byteOffset: _byteOffset, ...event }) {
-      void _byteOffset;
-      events.push(['featureStart', event]);
+      events.push([
+        'featureStart',
+        ...(sourceBacked && _byteOffset !== undefined
+          ? [{ ...event, byteOffset: _byteOffset }]
+          : [event]),
+      ]);
     },
     property: (event) => events.push(['property', event]),
     propertyValue: (event) => events.push(['propertyValue', event]),
@@ -120,6 +128,23 @@ function trace(source: string, indexed: boolean): readonly unknown[] {
     listener,
   });
   return [events, semanticSummary(summary)];
+}
+
+export async function stableProjectedExecution(
+  test: TortureCase,
+  parser: 'buffered' | 'indexed',
+): Promise<unknown> {
+  const result = await lintGeoJSONTextWithParser(test.source, {
+    filename: 'map.geojson',
+    ...(test.cwd ? { cwd: test.cwd } : {}),
+    config: test.config ?? {},
+    parser,
+  });
+  return {
+    ordinary: ordinaryProjection(result),
+    source: sourceProjection(result),
+    hooks: trace(test.source, parser === 'indexed', true),
+  };
 }
 
 export async function assertOrdinaryEquivalence(
