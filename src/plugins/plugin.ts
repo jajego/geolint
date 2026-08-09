@@ -126,14 +126,23 @@ function validateRule(
       }
     }
   }
-  for (const key of ['docs', 'performance'] as const) {
-    const descriptor = Object.getOwnPropertyDescriptor(meta, key);
-    if (
-      descriptor &&
-      (!('value' in descriptor) || typeof descriptor.value !== 'string')
-    ) {
-      fail(`${path}.meta.${key}`, 'a string');
+  const docs = Object.getOwnPropertyDescriptor(meta, 'docs');
+  if (docs) {
+    if (!('value' in docs)) fail(`${path}.meta.docs`, 'a data property');
+    const value = plainRecord(docs.value, `${path}.meta.docs`);
+    knownKeys(value, new Set(['description', 'category']), `${path}.meta.docs`);
+    for (const key of ['description', 'category'] as const) {
+      if (typeof own(value, key, `${path}.meta.docs`) !== 'string') {
+        fail(`${path}.meta.docs.${key}`, 'a string');
+      }
     }
+  }
+  const performance = Object.getOwnPropertyDescriptor(meta, 'performance');
+  if (
+    performance &&
+    (!('value' in performance) || typeof performance.value !== 'string')
+  ) {
+    fail(`${path}.meta.performance`, 'a string');
   }
   const recommended = Object.getOwnPropertyDescriptor(meta, 'recommended');
   if (
@@ -231,6 +240,9 @@ export function stabilizePlugin(plugin: GeoLintPlugin): GeoLintPlugin {
         ...rule,
         meta: Object.freeze({
           ...rule.meta,
+          ...(rule.meta.docs
+            ? { docs: Object.freeze({ ...rule.meta.docs }) }
+            : {}),
           ...(rule.meta.requires
             ? { requires: Object.freeze([...rule.meta.requires]) }
             : {}),

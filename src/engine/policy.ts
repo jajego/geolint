@@ -135,12 +135,30 @@ function pluginFailure(
   );
 }
 
-function isThenable(value: unknown): boolean {
-  return (
-    value !== null &&
-    (typeof value === 'object' || typeof value === 'function') &&
-    typeof (value as { readonly then?: unknown }).then === 'function'
-  );
+function isPluginThenable(
+  value: unknown,
+  ruleId: string,
+  filePath: string,
+): boolean {
+  if (
+    value === null ||
+    (typeof value !== 'object' && typeof value !== 'function')
+  ) {
+    return false;
+  }
+  let then: unknown;
+  try {
+    then = (value as { readonly then?: unknown }).then;
+  } catch (error) {
+    throw pluginFailure(ruleId, filePath, error);
+  }
+  if (typeof then !== 'function') return false;
+  try {
+    void Promise.resolve(value).catch(() => undefined);
+  } catch (error) {
+    throw pluginFailure(ruleId, filePath, error);
+  }
+  return true;
 }
 
 function pluginListener(
@@ -153,7 +171,7 @@ function pluginListener(
     value === null ||
     typeof value !== 'object' ||
     Array.isArray(value) ||
-    isThenable(value)
+    isPluginThenable(value, ruleId, filePath)
   ) {
     throw pluginFailure(
       ruleId,
@@ -199,7 +217,7 @@ function pluginListener(
       } catch (error) {
         throw pluginFailure(ruleId, filePath, error);
       }
-      if (isThenable(result)) {
+      if (isPluginThenable(result, ruleId, filePath)) {
         throw pluginFailure(
           ruleId,
           filePath,

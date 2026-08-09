@@ -40,6 +40,7 @@ export type {
   RuleContext,
   RuleDefinition,
   RuleDiagnosticInput,
+  RuleDocs,
   RuleDocumentSummary,
   RuleListener,
   RuleMeta,

@@ -24,6 +24,11 @@ export interface RuleContext {
   report(diagnostic: RuleDiagnosticInput): void;
 }
 
+export interface RuleDocs {
+  readonly description: string;
+  readonly category: string;
+}
+
 type RequiredFactFields<F extends SummaryFactName> = F extends 'vertexCount'
   ? Required<Pick<FileSummary, 'largestFeatureVertices'>>
   : F extends 'propertyStats'
@@ -86,7 +91,7 @@ export interface RuleMeta<
   readonly name: string;
   readonly schema: S;
   readonly requires?: R;
-  readonly docs?: string;
+  readonly docs?: RuleDocs;
   readonly recommended?: boolean;
   readonly performance?: string;
 }

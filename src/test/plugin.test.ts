@@ -27,6 +27,11 @@ import { assertOrdinaryEquivalence } from './torture-harness.js';
 const propertyAllowlist = defineRule({
   meta: {
     name: 'property-allowlist',
+    docs: {
+      description:
+        'Require a property value to belong to a configured allowlist.',
+      category: 'schema',
+    },
     schema: optionSchema.object({
       allow: optionSchema.array(optionSchema.string()),
     }),
@@ -107,6 +112,19 @@ const featureCollection = {
     },
   ],
 };
+
+async function assertNoUnhandledRejection(action: () => Promise<void>) {
+  const unhandled: unknown[] = [];
+  const listener = (reason: unknown) => unhandled.push(reason);
+  process.on('unhandledRejection', listener);
+  try {
+    await action();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', listener);
+  }
+}
 
 test('namespaced plugin rules share options, hooks, aggregates, and diagnostics', async () => {
   const result = await lintGeoJSON(featureCollection, {
@@ -316,6 +334,117 @@ test('runtime thenables and malformed listeners fail as plugin errors', async ()
   }
 });
 
+test('async plugin returns reject without unhandled rejections', async () => {
+  const cause = new Error('async boom');
+  const cases = [
+    {
+      name: 'create',
+      rule: defineRule({
+        meta: { name: 'async', schema: null },
+        create: (async () => {
+          throw cause;
+        }) as never,
+      }),
+      value: featureCollection,
+    },
+    {
+      name: 'coordinate',
+      rule: defineRule({
+        meta: { name: 'async', schema: null },
+        create: (() => ({
+          coordinate: (async () => {
+            throw cause;
+          }) as never,
+        })) as never,
+      }),
+      value: featureCollection,
+    },
+    {
+      name: 'document',
+      rule: defineRule({
+        meta: { name: 'async', schema: null, requires: ['featureCount'] },
+        create: (() => ({
+          document: (async () => {
+            throw cause;
+          }) as never,
+        })) as never,
+      }),
+      value: featureCollection,
+    },
+  ];
+  for (const { name, rule, value } of cases) {
+    const unsafe = definePlugin({
+      meta: { apiVersion: 1 },
+      rules: { async: rule },
+    });
+    await assertNoUnhandledRejection(async () => {
+      await assert.rejects(
+        lintGeoJSON(value, {
+          filename: `${name}.geojson`,
+          config: {
+            plugins: { acme: unsafe },
+            rules: { 'acme/async': 'error' },
+          },
+        }),
+        (error) =>
+          error instanceof GeoLintPluginError &&
+          error.ruleId === 'acme/async' &&
+          error.filePath === `${name}.geojson`,
+      );
+    });
+  }
+});
+
+test('custom thenables and throwing then accessors remain plugin errors', async () => {
+  const cause = new Error('then getter boom');
+  for (const create of [() => ({ then() {} })]) {
+    const unsafe = definePlugin({
+      meta: { apiVersion: 1 },
+      rules: {
+        unsafe: defineRule({
+          meta: { name: 'unsafe', schema: null },
+          create: create as never,
+        }),
+      },
+    });
+    await assert.rejects(
+      lintGeoJSON(featureCollection, {
+        filename: 'thenable.geojson',
+        config: {
+          plugins: { acme: unsafe },
+          rules: { 'acme/unsafe': 'error' },
+        },
+      }),
+      (error) =>
+        error instanceof GeoLintPluginError &&
+        error.filePath === 'thenable.geojson',
+    );
+  }
+  const accessor = definePlugin({
+    meta: { apiVersion: 1 },
+    rules: {
+      unsafe: defineRule({
+        meta: { name: 'unsafe', schema: null },
+        create: (() => ({
+          get then() {
+            throw cause;
+          },
+        })) as never,
+      }),
+    },
+  });
+  await assert.rejects(
+    lintGeoJSON(featureCollection, {
+      filename: 'getter.geojson',
+      config: {
+        plugins: { acme: accessor },
+        rules: { 'acme/unsafe': 'error' },
+      },
+    }),
+    (error) => error instanceof GeoLintPluginError && error.cause === cause,
+  );
+});
+
 test('plugin validation rejects ambiguous or unsafe definitions', () => {
   const invalid: unknown[] = [
     null,
@@ -331,6 +460,47 @@ test('plugin validation rejects ambiguous or unsafe definitions', () => {
   ];
   for (const value of invalid) {
     assert.throws(() => definePlugin(value as never), GeoLintConfigError);
+  }
+});
+
+test('plugin validation accepts V5 rule docs and rejects malformed docs', async () => {
+  const documented = definePlugin({
+    meta: { apiVersion: 1 },
+    rules: { 'property-allowlist': propertyAllowlist },
+  });
+  await assert.doesNotReject(
+    lintGeoJSON(featureCollection, {
+      config: {
+        plugins: { acme: documented },
+        rules: { 'acme/property-allowlist': ['error', { allow: ['name'] }] },
+      },
+    }),
+  );
+  const malformed = [
+    'text',
+    null,
+    [],
+    {},
+    { description: 'x' },
+    { category: 'schema' },
+    { description: 123, category: 'schema' },
+  ];
+  for (const docs of malformed) {
+    assert.throws(
+      () =>
+        definePlugin({
+          meta: { apiVersion: 1 },
+          rules: {
+            local: {
+              meta: { name: 'local', schema: null, docs },
+              create() {
+                return {};
+              },
+            },
+          },
+        } as never),
+      GeoLintConfigError,
+    );
   }
 });
 

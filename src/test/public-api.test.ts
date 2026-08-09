@@ -32,12 +32,19 @@ test('root module exports only implemented consumer APIs', () => {
 });
 
 test('plugin authoring preserves rule keys, option inference, and V1 types', () => {
+  const schema = geolint.optionSchema.object({
+    value: geolint.optionSchema.string(),
+  });
   const rule = geolint.defineRule({
     meta: {
       name: 'typed',
-      schema: geolint.optionSchema.object({
-        value: geolint.optionSchema.string(),
-      }),
+      docs: {
+        description: 'Require a configured property value.',
+        category: 'schema',
+      },
+      schema,
+      recommended: false,
+      performance: 'linear',
     },
     create(_context, options) {
       const value: string = options.value;
