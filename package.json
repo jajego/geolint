@@ -31,9 +31,12 @@
     "test:torture": "npm run build && node --test dist/test/torture-*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "format": "prettier --write src package.json tsconfig.json eslint.config.js README.md docs/implementation-notes.md .prettierrc.json",
-    "format:check": "prettier --check src package.json tsconfig.json eslint.config.js README.md docs/implementation-notes.md .prettierrc.json",
-    "benchmark": "npm run build && node dist/benchmark/index.js"
+    "format": "prettier --write src package.json tsconfig.json eslint.config.js README.md docs/*.md .prettierrc.json",
+    "format:check": "prettier --check src package.json tsconfig.json eslint.config.js README.md docs/*.md .prettierrc.json",
+    "benchmark": "npm run build && node dist/benchmark/index.js",
+    "benchmark:extended": "npm run build && node dist/benchmark/index.js --extended",
+    "benchmark:json": "npm run build && node dist/benchmark/index.js --json",
+    "benchmark:compare": "npm run build && node dist/benchmark/compare-cli.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

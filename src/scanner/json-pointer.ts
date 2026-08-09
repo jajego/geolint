@@ -1,7 +1,10 @@
 import type { JsonPointer } from '../types/semantic.js';
 
 function escapeSegment(segment: string | number): string {
-  return String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
+  if (typeof segment === 'number') return String(segment);
+  return segment.includes('~') || segment.includes('/')
+    ? segment.replaceAll('~', '~0').replaceAll('/', '~1')
+    : segment;
 }
 
 export function jsonPointer(

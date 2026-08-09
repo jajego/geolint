@@ -20,4 +20,9 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm test
-      - run: npm run benchmark
+      - run: npm run benchmark -- --output benchmark-results/ci.json
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: geolint-benchmark-${{ runner.os }}
+          path: benchmark-results/ci.json
