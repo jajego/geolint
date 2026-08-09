@@ -1,9 +1,24 @@
 {
   "name": "geolint",
   "version": "0.0.0",
-  "description": "Fast quality gates for production GeoJSON.",
+  "description": "Fast, TypeScript-native quality and regression linting for GeoJSON.",
+  "keywords": [
+    "geojson",
+    "lint",
+    "geospatial",
+    "typescript",
+    "ci"
+  ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jajego/geolint.git"
+  },
+  "bugs": "https://github.com/jajego/geolint/issues",
+  "homepage": "https://github.com/jajego/geolint#readme",
+  "sideEffects": false,
   "type": "module",
+  "types": "./dist/index.d.ts",
   "engines": {
     "node": ">=22"
   },
@@ -20,9 +35,26 @@
   },
   "files": [
     "dist",
+    "!dist/benchmark",
+    "!dist/test",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "docs/configuration.md",
+    "docs/rules.md",
+    "docs/budgets.md",
+    "docs/node-api.md",
+    "docs/plugins.md",
+    "docs/regression.md",
+    "docs/errors.md",
+    "docs/performance.md",
+    "docs/releasing.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "node --input-type=module -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true })\"",
@@ -34,8 +66,12 @@
     "check:deps": "depcruise --config .dependency-cruiser.cjs src",
     "check:dead-code": "knip",
     "check": "npm run typecheck && npm run lint && npm run check:deps && npm run check:dead-code",
-    "format": "prettier --write src package.json tsconfig.json eslint.config.js .dependency-cruiser.cjs knip.json .github/workflows/*.yml README.md docs/*.md .prettierrc.json",
-    "format:check": "prettier --check src package.json tsconfig.json eslint.config.js .dependency-cruiser.cjs knip.json .github/workflows/*.yml README.md docs/*.md .prettierrc.json",
+    "smoke:package": "node scripts/package-smoke.mjs",
+    "verify:release": "npm run check && npm run format:check && npm test && npm run test:integration && npm run test:torture && npm run build && npm run smoke:package",
+    "prepack": "npm run check && npm run clean && npm run build",
+    "prepublishOnly": "npm run verify:release",
+    "format": "prettier --write src scripts/*.mjs package.json tsconfig.json eslint.config.js .dependency-cruiser.cjs knip.json .github/workflows/*.yml README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md docs/*.md .prettierrc.json",
+    "format:check": "prettier --check src scripts/*.mjs package.json tsconfig.json eslint.config.js .dependency-cruiser.cjs knip.json .github/workflows/*.yml README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md docs/*.md .prettierrc.json",
     "benchmark": "npm run build && node dist/benchmark/index.js",
     "benchmark:extended": "npm run build && node dist/benchmark/index.js --extended",
     "benchmark:json": "npm run build && node dist/benchmark/index.js --json",

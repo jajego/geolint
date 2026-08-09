@@ -1,66 +1,81 @@
 # GeoLint
 
-Fast quality gates for production GeoJSON.
+GeoLint is a fast, TypeScript-native, ESLint-style quality and regression linter for GeoJSON artifacts used in web applications and CI. It checks structural sanity first, then quality rules, artifact facts, opt-in delivery budgets, and optional regression baselines.
 
-GeoLint is in active development. Configuration and target resolution are in
-place, along with structural recovery, buffered and indexed-source execution,
-V1 quality rules, and semantic/source budgets through the `lintGeoJSON()`,
-`lintGeoJSONText()`, and `lintFile()` Node APIs. Schema-v1 regression baselines
-and full/partial snapshot approval are also available; snapshot execution is
-independent of ordinary lint policy.
+GeoLint is not a topology engine, geometry repair tool, spatial database, or replacement for a domain-specific GIS validator.
+
+## Quick start
+
+```sh
+npx geolint map.geojson
+```
+
+For repeatable local and CI use:
 
 ```sh
 npm install --save-dev geolint
-npx geolint --help
-npx geolint --print-config public/map.geojson
-npx geolint snapshot
+npx geolint "public/**/*.geojson"
 ```
 
-## Workers
+No config file is required. When no config is discovered, GeoLint applies `geolint/recommended`: duplicate and mixed-type Feature IDs, inconsistent property types, invalid longitude/latitude ranges, and inconsistent coordinate dimensions are errors. Numeric delivery budgets and regression checks remain opt-in.
 
-GeoLint can parallelize separate files with native Worker threads. Automatic mode is deliberately conservative: it uses at most four workers only for batches of at least four files averaging at least 5 MB each. One large GeoJSON file is never split and receives no worker speedup.
+An explicit or discovered config is authoritative; recommended rules are not silently merged. Extend the preset when you want it:
 
-Use `--workers 1` for strict main-thread execution or `--workers N` to set an explicit maximum. Reloadable plugins declare `moduleUrl` and `exportName`; automatic mode falls back to the main thread for inline plugins, while an explicit count above one reports a capability error. Snapshot workers are used only when explicitly requested. Programmatic `lintFiles()` uses automatic scheduling internally without adding a public worker-count option.
-
-## Plugins
-
-External rules use the same synchronous semantic hooks and option schemas as
-built-in rules. Register a plugin under a local namespace, then configure its
-rules as `namespace/rule`:
-
-```ts
-import { defineConfig, definePlugin, defineRule } from 'geolint';
-
-const requireName = defineRule({
-  meta: { name: 'require-name', schema: null },
-  create(context) {
-    return {
-      feature(feature) {
-        if (feature.properties.count === 0) {
-          context.report({ message: 'Feature needs properties.' });
-        }
-      },
-    };
-  },
-});
-
-const plugin = definePlugin({
-  meta: {
-    apiVersion: 1,
-    moduleUrl: import.meta.url,
-    exportName: 'default',
-  },
-  rules: { 'require-name': requireName },
-});
+```js
+// geolint.config.mjs
+import { defineConfig } from 'geolint';
 
 export default defineConfig({
-  plugins: { acme: plugin },
-  rules: { 'acme/require-name': 'error' },
+  extends: ['geolint/recommended'],
+  files: ['public/**/*.geojson'],
+  rules: { 'require-feature-id': 'warn' },
 });
 ```
 
-Plugins are trusted application code executed in-process; GeoLint does not
-sandbox them. Hooks must be synchronous. A `coordinateLexeme` hook
-automatically selects source-aware indexed execution and therefore cannot run
-against already-parsed object input. Optional `plugin.configs` policy fragments
-are typed and preserved, but Phase 8 does not give them magic `extends` names.
+## What it catches
+
+- malformed JSON and invalid GeoJSON structure, with bounded diagnostics;
+- inconsistent IDs, properties, geometry types, and coordinate dimensions;
+- invalid coordinate ranges and source-level coordinate precision;
+- opt-in file, Feature, and vertex delivery budgets;
+- optional changes against a committed baseline;
+- custom project rules through a typed plugin API.
+
+## CI
+
+```sh
+npx geolint "public/**/*.geojson" --format json --max-warnings 0
+```
+
+Exit status is `0` when policy passes, `1` for lint/quality/budget/regression failures (or too many warnings), and `2` for operational failures.
+
+## Node API
+
+```js
+import { lintGeoJSONText } from 'geolint';
+
+const result = await lintGeoJSONText(source, { filename: 'map.geojson' });
+for (const diagnostic of result.diagnostics) {
+  console.log(diagnostic.code, diagnostic.message);
+}
+```
+
+GeoLint is ESM-only and requires Node.js 22 or newer.
+
+## Documentation
+
+- [Configuration and CLI](docs/configuration.md)
+- [Built-in rules](docs/rules.md)
+- [Delivery budgets](docs/budgets.md)
+- [Node API](docs/node-api.md)
+- [Plugin authoring](docs/plugins.md)
+- [Regression baselines](docs/regression.md)
+- [Errors and exit codes](docs/errors.md)
+- [Performance methodology](docs/performance.md)
+- [Contributing](CONTRIBUTING.md), [security](SECURITY.md), and [releases](docs/releasing.md)
+
+Use `npx geolint --help` for the complete CLI option summary and `npx geolint --print-config map.geojson` to inspect the effective per-file policy.
+
+## License
+
+MIT
