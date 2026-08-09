@@ -4,7 +4,9 @@ import type { BaselineFileEntry } from '../regression/schema.js';
 import { appendPointer } from '../scanner/json-pointer.js';
 import type {
   CoordinateObservation,
+  CoordinateLexemeObservation,
   FeatureIdObservation,
+  FeatureByteObservation,
 } from '../scanner/scan.js';
 import { validateRuleListener } from '../rules/define-rule.js';
 import type {
@@ -64,8 +66,12 @@ export interface CompiledPolicy {
   readonly listener?: SemanticListener;
   readonly coordinateObservation?: CoordinateObservation;
   readonly featureIdObservation?: FeatureIdObservation;
+  readonly featureByteObservation?: FeatureByteObservation;
   readonly facts: readonly SummaryFactName[];
   readonly exactFileBytes: boolean;
+  readonly numericLexemes: boolean;
+  readonly featureByteSpans: boolean;
+  readonly coordinateLexemeObservation?: CoordinateLexemeObservation;
   finish(summary: FileSummary): readonly SkippedPolicy[];
 }
 
@@ -184,6 +190,7 @@ function compileRules(
   facts: Set<SummaryFactName>,
   aggregates: AggregatePolicy[],
   coordinateObservations: CoordinateObservation[],
+  coordinateLexemeObservations: CoordinateLexemeObservation[],
   featureIdObservations: FeatureIdObservation[],
 ): void {
   for (const [name, setting] of Object.entries(rules)) {
@@ -221,11 +228,55 @@ function compileRules(
     const instance = rule.create(ruleContext, options);
     const requires = rule.meta.requires ?? [];
     validateRuleListener(rule.meta.name, requires, instance);
-    if (instance.coordinateLexeme) {
+    if (rule.meta.name === 'coordinate-precision') {
+      if (inputKind === 'object') {
+        throw new GeoLintCapabilityError(
+          'Rule "coordinate-precision" requires numeric source lexemes, which parsed object input cannot provide.',
+          'GEOLINT_CAPABILITY_NUMERIC_LEXEMES',
+        );
+      }
+      const maximumDecimals = (options as { maximumDecimals: number })
+        .maximumDecimals;
+      coordinateLexemeObservations.push(
+        (rawValues, featureIndex, parentPath, positionIndex, byteOffset) => {
+          let maximumObserved = 0;
+          let offendingToken: string | undefined;
+          for (const raw of rawValues) {
+            const observed = effectiveDecimals(raw);
+            if (observed > maximumObserved) maximumObserved = observed;
+            if (offendingToken === undefined && observed > maximumDecimals) {
+              offendingToken = raw;
+            }
+          }
+          if (offendingToken === undefined) return;
+          diagnostics.reportLazy(
+            {
+              code: rule.meta.name,
+              source: 'rule',
+              severity: compiled.severity,
+            },
+            () => ({
+              message: 'Coordinate precision exceeds its configured limit.',
+              ...(featureIndex === undefined ? {} : { featureIndex }),
+              path:
+                positionIndex === undefined
+                  ? parentPath
+                  : appendPointer(parentPath, positionIndex),
+              byteOffset,
+              data: {
+                maximumDecimals,
+                maximumObserved,
+                offendingToken,
+              },
+            }),
+          );
+        },
+      );
+      continue;
+    }
+    if (instance.coordinateLexeme && inputKind === 'object') {
       throw new GeoLintCapabilityError(
-        inputKind === 'object'
-          ? `Rule "${rule.meta.name}" requires numeric source lexemes, which parsed object input cannot provide.`
-          : `Rule "${rule.meta.name}" requires indexed numeric source lexemes, which the buffered text strategy does not provide yet.`,
+        `Rule "${rule.meta.name}" requires numeric source lexemes, which parsed object input cannot provide.`,
         'GEOLINT_CAPABILITY_NUMERIC_LEXEMES',
       );
     }
@@ -323,6 +374,21 @@ function compileRules(
   }
 }
 
+function effectiveDecimals(raw: string): number {
+  const exponentAt = raw.search(/[eE]/);
+  const mantissa = exponentAt === -1 ? raw : raw.slice(0, exponentAt);
+  const decimalAt = mantissa.indexOf('.');
+  const fractionDigits = decimalAt === -1 ? 0 : mantissa.length - decimalAt - 1;
+  if (exponentAt === -1) return fractionDigits;
+  const exponent = raw.slice(exponentAt + 1);
+  const negative = exponent.startsWith('-');
+  const digits = exponent.replace(/^[+-]?0*/, '');
+  if (digits.length > 15) return negative ? Number.MAX_SAFE_INTEGER : 0;
+  const magnitude = digits.length === 0 ? 0 : Number(digits);
+  if (!negative) return Math.max(0, fractionDigits - magnitude);
+  return Math.min(Number.MAX_SAFE_INTEGER, fractionDigits + magnitude);
+}
+
 function normalizeBudget<T>(
   value:
     | T
@@ -400,7 +466,8 @@ function compileBudgets(
   listeners: SemanticListener[],
   facts: Set<SummaryFactName>,
   aggregates: AggregatePolicy[],
-): boolean {
+  featureByteObservations: FeatureByteObservation[],
+): { readonly exactFileBytes: boolean; readonly featureByteSpans: boolean } {
   const unknown = Object.keys(budgets).find(
     (key) =>
       !['fileSize', 'featureCount', 'totalVertices', 'feature'].includes(key),
@@ -510,13 +577,31 @@ function compileBudgets(
       'budgets.feature.bytes',
       parseByteSize,
     );
-    if (bytes) {
+    if (bytes && inputKind === 'object') {
       throw new GeoLintCapabilityError(
-        inputKind === 'object'
-          ? 'Feature-byte budgets require source spans, which parsed object input cannot provide.'
-          : 'Feature-byte budgets require indexed source spans, which the buffered text strategy does not provide yet.',
+        'Feature-byte budgets require source spans, which parsed object input cannot provide.',
         'GEOLINT_CAPABILITY_FEATURE_BYTES',
       );
+    }
+    if (bytes) {
+      featureByteObservations.push((index, path, actual, byteOffset, id) => {
+        if (actual <= bytes.limit) return;
+        diagnostics.reportLazy(
+          {
+            code: 'budget/feature-bytes',
+            source: 'budget',
+            severity: bytes.severity,
+          },
+          () => ({
+            message: 'Feature bytes exceed their configured budget.',
+            featureIndex: index,
+            ...(id === undefined ? {} : { featureId: id }),
+            path,
+            byteOffset,
+            data: { actual, limit: bytes.limit },
+          }),
+        );
+      });
     }
     const vertices = normalizeBudget(
       feature.vertices,
@@ -542,7 +627,12 @@ function compileBudgets(
       });
     }
   }
-  return Boolean(fileSize);
+  return {
+    exactFileBytes: Boolean(fileSize),
+    featureByteSpans: Boolean(
+      feature && feature.bytes !== undefined && feature.bytes !== false,
+    ),
+  };
 }
 
 export function compilePolicy(
@@ -562,7 +652,9 @@ export function compilePolicy(
   const facts = new Set<SummaryFactName>();
   const aggregates: AggregatePolicy[] = [];
   const coordinateObservations: CoordinateObservation[] = [];
+  const coordinateLexemeObservations: CoordinateLexemeObservation[] = [];
   const featureIdObservations: FeatureIdObservation[] = [];
+  const featureByteObservations: FeatureByteObservation[] = [];
   compileRules(
     config.rules,
     filePath,
@@ -572,15 +664,17 @@ export function compilePolicy(
     facts,
     aggregates,
     coordinateObservations,
+    coordinateLexemeObservations,
     featureIdObservations,
   );
-  const budgetFileBytes = compileBudgets(
+  const budgetRequirements = compileBudgets(
     config.budgets,
     inputKind,
     diagnostics,
     listeners,
     facts,
     aggregates,
+    featureByteObservations,
   );
   const regression = compileRegression(
     config.regression,
@@ -610,12 +704,45 @@ export function compilePolicy(
               observe(index, path, status, id);
             }
           };
+  const coordinateLexemeObservation: CoordinateLexemeObservation | undefined =
+    coordinateLexemeObservations.length === 0
+      ? undefined
+      : coordinateLexemeObservations.length === 1
+        ? coordinateLexemeObservations[0]
+        : (rawValues, featureIndex, parentPath, positionIndex, byteOffset) => {
+            for (const observe of coordinateLexemeObservations) {
+              observe(
+                rawValues,
+                featureIndex,
+                parentPath,
+                positionIndex,
+                byteOffset,
+              );
+            }
+          };
+  const featureByteObservation: FeatureByteObservation | undefined =
+    featureByteObservations.length === 0
+      ? undefined
+      : featureByteObservations.length === 1
+        ? featureByteObservations[0]
+        : (index, path, bytes, byteOffset, id) => {
+            for (const observe of featureByteObservations) {
+              observe(index, path, bytes, byteOffset, id);
+            }
+          };
   return {
     ...(listener ? { listener } : {}),
     ...(coordinateObservation ? { coordinateObservation } : {}),
     ...(featureIdObservation ? { featureIdObservation } : {}),
+    ...(coordinateLexemeObservation ? { coordinateLexemeObservation } : {}),
+    ...(featureByteObservation ? { featureByteObservation } : {}),
     facts: [...facts],
-    exactFileBytes: budgetFileBytes || regression.exactFileBytes,
+    exactFileBytes:
+      budgetRequirements.exactFileBytes || regression.exactFileBytes,
+    numericLexemes:
+      coordinateLexemeObservations.length > 0 ||
+      Boolean(listener?.coordinateLexeme),
+    featureByteSpans: budgetRequirements.featureByteSpans,
     finish(summary) {
       const skipped: SkippedPolicy[] = [];
       for (const policy of aggregates) {

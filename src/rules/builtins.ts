@@ -315,7 +315,8 @@ const coordinatePrecision = defineRule({
   },
   create() {
     return {
-      // The hook is the capability declaration; indexed parsing will supply it.
+      // Policy compilation keeps this public hook contract but uses a lazy
+      // built-in observation to avoid allocating paths for passing Positions.
       coordinateLexeme() {},
     };
   },

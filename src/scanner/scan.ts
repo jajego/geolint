@@ -4,6 +4,17 @@ import type {
   SemanticListener,
 } from '../engine/requirements.js';
 import { appendPointer, jsonPointer } from './json-pointer.js';
+import {
+  indexedCoordinateElements,
+  indexedCoordinateKind,
+  indexedCoordinateNumber,
+  indexedCoordinateSpan,
+  indexedFeatureSpan,
+  indexedSequenceElements,
+  isIndexedCoordinateValue,
+  isIndexedSequence,
+  type IndexedCoordinateValue,
+} from '../parser/indexed-source.js';
 import type {
   CoordinateDimensions,
   FileSummary,
@@ -65,7 +76,9 @@ interface ScanState {
   readonly listener?: SemanticListener;
   readonly instrumentation?: ScanInstrumentation;
   readonly coordinateObservation?: CoordinateObservation;
+  readonly coordinateLexemeObservation?: CoordinateLexemeObservation;
   readonly featureIdObservation?: FeatureIdObservation;
+  readonly featureByteObservation?: FeatureByteObservation;
   readonly diagnostics: DiagnosticCollector;
   readonly partialFacts: Set<SummaryFactName>;
   documentPartial: boolean;
@@ -73,6 +86,8 @@ interface ScanState {
   validPropertiesFeatureCount: number;
   totalVertices: number;
   largestFeatureVertices: number;
+  largestFeatureBytes: number;
+  featureByteStatsPartial: boolean;
   propertiesNullCount: number;
   nullGeometryCount: number;
   readonly dimensions: MutableDimensions;
@@ -102,7 +117,9 @@ export interface ScanOptions {
   readonly sourceBytes?: number;
   readonly instrumentation?: ScanInstrumentation;
   readonly coordinateObservation?: CoordinateObservation;
+  readonly coordinateLexemeObservation?: CoordinateLexemeObservation;
   readonly featureIdObservation?: FeatureIdObservation;
+  readonly featureByteObservation?: FeatureByteObservation;
   readonly diagnostics?: DiagnosticCollector;
 }
 
@@ -113,10 +130,26 @@ export type CoordinateObservation = (
   positionIndex: number | undefined,
 ) => void;
 
+export type CoordinateLexemeObservation = (
+  rawValues: readonly string[],
+  featureIndex: number | undefined,
+  parentPath: JsonPointer,
+  positionIndex: number | undefined,
+  byteOffset: number,
+) => void;
+
 export type FeatureIdObservation = (
   index: number,
   path: JsonPointer,
   status: 'missing' | 'valid' | 'invalid',
+  id: string | number | undefined,
+) => void;
+
+export type FeatureByteObservation = (
+  index: number,
+  path: JsonPointer,
+  bytes: number,
+  byteOffset: number,
   id: string | number | undefined,
 ) => void;
 
@@ -324,32 +357,78 @@ function invalidPosition(
   );
 }
 
+type CoordinateValue = JsonValue | IndexedCoordinateValue;
+
+function isCoordinateArray(
+  value: CoordinateValue | undefined,
+): value is JsonValue[] | IndexedCoordinateValue {
+  return (
+    Array.isArray(value) ||
+    (isIndexedCoordinateValue(value) &&
+      indexedCoordinateKind(value) === 'array')
+  );
+}
+
+function* coordinateElements(
+  value: JsonValue[] | IndexedCoordinateValue,
+): Generator<CoordinateValue> {
+  if (Array.isArray(value)) {
+    yield* value;
+  } else {
+    yield* indexedCoordinateElements(value);
+  }
+}
+
+function positionValues(value: JsonValue[] | IndexedCoordinateValue):
+  | {
+      readonly values: readonly number[];
+      readonly rawValues?: readonly string[];
+      readonly byteOffset?: number;
+    }
+  | undefined {
+  if (Array.isArray(value)) {
+    if (
+      value.length < 2 ||
+      value.some(
+        (ordinate) =>
+          typeof ordinate !== 'number' || !Number.isFinite(ordinate),
+      )
+    ) {
+      return undefined;
+    }
+    return { values: value as number[] };
+  }
+  const values: number[] = [];
+  const rawValues: string[] = [];
+  for (const ordinate of indexedCoordinateElements(value)) {
+    const number = indexedCoordinateNumber(ordinate);
+    if (!number || !Number.isFinite(number.value)) return undefined;
+    values.push(number.value);
+    rawValues.push(number.raw);
+  }
+  if (values.length < 2) return undefined;
+  return {
+    values,
+    rawValues,
+    byteOffset: indexedCoordinateSpan(value).startByte,
+  };
+}
+
 function visitPosition(
-  value: JsonValue,
+  value: CoordinateValue,
   parentPath: JsonPointer,
   positionIndex: number | undefined,
   featureIndex: number | undefined,
   metrics: GeometryMetrics,
   state: ScanState,
 ): void {
-  if (!Array.isArray(value)) {
+  if (!isCoordinateArray(value)) {
     if (state.instrumentation) state.instrumentation.positionVisits += 1;
     invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
     return;
   }
-  const position = value;
-  let valid = position.length >= 2;
-  for (
-    let ordinateIndex = 0;
-    valid && ordinateIndex < position.length;
-    ordinateIndex += 1
-  ) {
-    const ordinate = position[ordinateIndex];
-    if (typeof ordinate !== 'number' || !Number.isFinite(ordinate)) {
-      valid = false;
-    }
-  }
-  if (!valid) {
+  const position = positionValues(value);
+  if (!position) {
     if (state.instrumentation) state.instrumentation.positionVisits += 1;
     invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
     return;
@@ -359,9 +438,9 @@ function visitPosition(
   metrics.vertices += 1;
   if (state.requirements.vertexCounts) state.totalVertices += 1;
   const dimensionKey =
-    position.length === 2
+    position.values.length === 2
       ? 'two'
-      : position.length === 3
+      : position.values.length === 3
         ? 'three'
         : 'fourOrMore';
   metrics.dimensions[dimensionKey] += 1;
@@ -371,19 +450,19 @@ function visitPosition(
   if (state.requirements.geometrySummaries) {
     metrics.bounds = updateBounds(
       metrics.bounds,
-      position[0] as number,
-      position[1] as number,
+      position.values[0]!,
+      position.values[1]!,
     );
   }
   if (state.requirements.geographicExtents) {
     state.bounds = updateBounds(
       state.bounds,
-      position[0] as number,
-      position[1] as number,
+      position.values[0]!,
+      position.values[1]!,
     );
   }
   state.coordinateObservation?.(
-    position as number[],
+    position.values,
     featureIndex,
     parentPath,
     positionIndex,
@@ -391,28 +470,39 @@ function visitPosition(
   if (state.listener?.coordinate) {
     state.listener.coordinate({
       ...(featureIndex === undefined ? {} : { featureIndex }),
-      values: position as number[],
+      values: position.values,
       path: positionPath(parentPath, positionIndex, state),
+    });
+  }
+  if (position.rawValues && position.byteOffset !== undefined) {
+    state.coordinateLexemeObservation?.(
+      position.rawValues,
+      featureIndex,
+      parentPath,
+      positionIndex,
+      position.byteOffset,
+    );
+    state.listener?.coordinateLexeme?.({
+      ...(featureIndex === undefined ? {} : { featureIndex }),
+      values: position.values,
+      rawValues: position.rawValues,
+      path: positionPath(parentPath, positionIndex, state),
+      byteOffset: position.byteOffset,
     });
   }
 }
 
 function visitPositions(
-  values: JsonValue[],
+  values: JsonValue[] | IndexedCoordinateValue,
   path: JsonPointer,
   featureIndex: number | undefined,
   metrics: GeometryMetrics,
   state: ScanState,
 ): void {
-  for (let index = 0; index < values.length; index += 1) {
-    visitPosition(
-      values[index] as JsonValue,
-      path,
-      index,
-      featureIndex,
-      metrics,
-      state,
-    );
+  let index = 0;
+  for (const value of coordinateElements(values)) {
+    visitPosition(value, path, index, featureIndex, metrics, state);
+    index += 1;
   }
 }
 
@@ -429,27 +519,26 @@ function invalidCoordinates(
 }
 
 function validPositionShape(
-  value: JsonValue | undefined,
-): value is JsonValue[] {
-  return (
-    Array.isArray(value) &&
-    value.length >= 2 &&
-    value.every(
-      (ordinate) => typeof ordinate === 'number' && Number.isFinite(ordinate),
-    )
-  );
+  value: CoordinateValue | undefined,
+): value is JsonValue[] | IndexedCoordinateValue {
+  return isCoordinateArray(value) && positionValues(value) !== undefined;
 }
 
-function positionsEqual(left: JsonValue[], right: JsonValue[]): boolean {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
+function positionsEqual(
+  left: JsonValue[] | IndexedCoordinateValue,
+  right: JsonValue[] | IndexedCoordinateValue,
+): boolean {
+  const leftValues = positionValues(left)!.values;
+  const rightValues = positionValues(right)!.values;
+  if (leftValues.length !== rightValues.length) return false;
+  for (let index = 0; index < leftValues.length; index += 1) {
+    if (leftValues[index] !== rightValues[index]) return false;
   }
   return true;
 }
 
 function scanLine(
-  values: JsonValue[],
+  values: JsonValue[] | IndexedCoordinateValue,
   path: JsonPointer,
   featureIndex: number | undefined,
   metrics: GeometryMetrics,
@@ -457,9 +546,21 @@ function scanLine(
   ring: boolean,
 ): void {
   const minimum = ring ? 4 : 2;
-  const first = values[0];
-  const last = values[values.length - 1];
-  if (values.length < minimum) {
+  let length = 0;
+  let first: CoordinateValue | undefined;
+  let last: CoordinateValue | undefined;
+  if (Array.isArray(values)) {
+    length = values.length;
+    first = values[0];
+    last = values[values.length - 1];
+  } else {
+    for (const value of indexedCoordinateElements(values)) {
+      if (length === 0) first = value;
+      last = value;
+      length += 1;
+    }
+  }
+  if (length < minimum) {
     invalidCoordinates(
       path,
       featureIndex,
@@ -488,7 +589,7 @@ function scanLine(
 
 function scanCoordinateTree(
   type: GeoJSONGeometryType,
-  coordinates: JsonValue[],
+  coordinates: JsonValue[] | IndexedCoordinateValue,
   coordinatesPath: JsonPointer,
   featureIndex: number | undefined,
   metrics: GeometryMetrics,
@@ -528,12 +629,13 @@ function scanCoordinateTree(
     return;
   }
   if (type === 'MultiLineString' || type === 'Polygon') {
-    if (type === 'Polygon') metrics.ringCount += coordinates.length;
-    for (let first = 0; first < coordinates.length; first += 1) {
+    let first = 0;
+    for (const part of coordinateElements(coordinates)) {
+      if (type === 'Polygon') metrics.ringCount += 1;
       const partPath = appendPointer(coordinatesPath, first);
-      const part = coordinates[first];
-      if (!Array.isArray(part)) {
+      if (!isCoordinateArray(part)) {
         invalidCoordinates(partPath, featureIndex, metrics, state);
+        first += 1;
         continue;
       }
       scanLine(
@@ -544,28 +646,32 @@ function scanCoordinateTree(
         state,
         type === 'Polygon',
       );
+      first += 1;
     }
     return;
   }
   if (type === 'MultiPolygon') {
-    for (let polygon = 0; polygon < coordinates.length; polygon += 1) {
+    let polygon = 0;
+    for (const polygonValue of coordinateElements(coordinates)) {
       const polygonPath = appendPointer(coordinatesPath, polygon);
-      const polygonValue = coordinates[polygon];
-      if (!Array.isArray(polygonValue)) {
+      if (!isCoordinateArray(polygonValue)) {
         invalidCoordinates(polygonPath, featureIndex, metrics, state);
+        polygon += 1;
         continue;
       }
-      const rings = polygonValue;
-      metrics.ringCount += rings.length;
-      for (let ring = 0; ring < rings.length; ring += 1) {
+      let ring = 0;
+      for (const ringValue of coordinateElements(polygonValue)) {
+        metrics.ringCount += 1;
         const ringPath = appendPointer(polygonPath, ring);
-        const ringValue = rings[ring];
-        if (!Array.isArray(ringValue)) {
+        if (!isCoordinateArray(ringValue)) {
           invalidCoordinates(ringPath, featureIndex, metrics, state);
+          ring += 1;
           continue;
         }
         scanLine(ringValue, ringPath, featureIndex, metrics, state, true);
+        ring += 1;
       }
+      polygon += 1;
     }
   }
 }
@@ -629,7 +735,10 @@ function scanGeometry(
   if (type === 'GeometryCollection') {
     const geometriesPath = appendPointer(path, 'geometries');
     const geometries = ownMember(geometry, 'geometries');
-    if (!Array.isArray(geometries)) {
+    if (
+      !Array.isArray(geometries) &&
+      !isIndexedSequence(geometries, 'geometries')
+    ) {
       metrics.complete = false;
       damage(
         state,
@@ -647,9 +756,13 @@ function scanGeometry(
       );
       return metrics;
     }
-    for (let index = 0; index < geometries.length; index += 1) {
+    const geometryValues = Array.isArray(geometries)
+      ? geometries
+      : indexedSequenceElements(geometries);
+    let index = 0;
+    for (const geometryValue of geometryValues) {
       const child = scanGeometry(
-        geometries[index] as JsonValue,
+        geometryValue as JsonValue,
         appendPointer(geometriesPath, index),
         featureIndex,
         state,
@@ -665,11 +778,12 @@ function scanGeometry(
       const mergedBounds = mergeBounds(metrics.bounds, child.bounds);
       if (mergedBounds) metrics.bounds = mergedBounds;
       if (!child.complete) metrics.complete = false;
+      index += 1;
     }
   } else {
     const coordinatesPath = appendPointer(path, 'coordinates');
     const coordinates = ownMember(geometry, 'coordinates');
-    if (!Array.isArray(coordinates)) {
+    if (!isCoordinateArray(coordinates)) {
       invalidCoordinates(coordinatesPath, featureIndex, metrics, state);
       return metrics;
     }
@@ -741,6 +855,9 @@ function scanFeature(
   state: ScanState,
 ): void {
   if (!isObject(value) || ownMember(value, 'type') !== 'Feature') {
+    if (state.requirements.featureByteSpans) {
+      state.featureByteStatsPartial = true;
+    }
     damage(state, ...semanticFacts);
     report(
       state,
@@ -752,8 +869,25 @@ function scanFeature(
     return;
   }
   const feature = value;
+  const sourceSpan = indexedFeatureSpan(feature);
+  const featureBytes =
+    state.requirements.featureByteSpans && sourceSpan
+      ? sourceSpan.endByteExclusive - sourceSpan.startByte
+      : undefined;
+  if (state.requirements.featureByteSpans) {
+    if (featureBytes === undefined) state.featureByteStatsPartial = true;
+    else
+      state.largestFeatureBytes = Math.max(
+        state.largestFeatureBytes,
+        featureBytes,
+      );
+  }
   state.featureCount += 1;
-  state.listener?.featureStart?.({ index, path });
+  state.listener?.featureStart?.({
+    index,
+    path,
+    ...(sourceSpan ? { byteOffset: sourceSpan.startByte } : {}),
+  });
   validateBbox(feature, path, state, index);
 
   const id = ownMember(feature, 'id');
@@ -783,7 +917,6 @@ function scanFeature(
       else state.ids.add(identity);
     }
   }
-
   const propertiesPath = appendPointer(path, 'properties');
   const propertiesValue = ownMember(feature, 'properties');
   const propertiesValid = propertiesValue === null || isObject(propertiesValue);
@@ -844,6 +977,15 @@ function scanFeature(
       metrics?.vertices ?? 0,
     );
   }
+  if (featureBytes !== undefined && sourceSpan) {
+    state.featureByteObservation?.(
+      index,
+      path,
+      featureBytes,
+      sourceSpan.startByte,
+      validId,
+    );
+  }
 
   if (metrics?.complete && state.listener?.geometry) {
     state.listener.geometry(geometrySummary(metrics));
@@ -863,6 +1005,7 @@ function scanFeature(
       ...(validId === undefined ? {} : { id: validId }),
       properties,
       geometry: metrics ? geometrySummary(metrics) : null,
+      ...(featureBytes === undefined ? {} : { bytes: featureBytes }),
     });
   }
 }
@@ -910,8 +1053,14 @@ export function scanGeoJSON(
     ...(options.coordinateObservation
       ? { coordinateObservation: options.coordinateObservation }
       : {}),
+    ...(options.coordinateLexemeObservation
+      ? { coordinateLexemeObservation: options.coordinateLexemeObservation }
+      : {}),
     ...(options.featureIdObservation
       ? { featureIdObservation: options.featureIdObservation }
+      : {}),
+    ...(options.featureByteObservation
+      ? { featureByteObservation: options.featureByteObservation }
       : {}),
     diagnostics:
       options.diagnostics ?? new DiagnosticCollector(options.filePath),
@@ -921,6 +1070,8 @@ export function scanGeoJSON(
     validPropertiesFeatureCount: 0,
     totalVertices: 0,
     largestFeatureVertices: 0,
+    largestFeatureBytes: 0,
+    featureByteStatsPartial: false,
     propertiesNullCount: 0,
     nullGeometryCount: 0,
     dimensions: emptyDimensions(),
@@ -937,6 +1088,7 @@ export function scanGeoJSON(
 
   const rootPath = jsonPointer();
   if (!isObject(value)) {
+    if (requirements.featureByteSpans) state.featureByteStatsPartial = true;
     damage(state, ...semanticFacts);
     report(
       state,
@@ -950,7 +1102,11 @@ export function scanGeoJSON(
       validateBbox(value, rootPath, state);
       const featuresPath = jsonPointer('features');
       const features = ownMember(value, 'features');
-      if (!Array.isArray(features)) {
+      if (
+        !Array.isArray(features) &&
+        !isIndexedSequence(features, 'features')
+      ) {
+        if (requirements.featureByteSpans) state.featureByteStatsPartial = true;
         damage(state, ...semanticFacts);
         report(
           state,
@@ -959,13 +1115,18 @@ export function scanGeoJSON(
           featuresPath,
         );
       } else {
-        for (let index = 0; index < features.length; index += 1) {
+        const featureValues = Array.isArray(features)
+          ? features
+          : indexedSequenceElements(features);
+        let index = 0;
+        for (const feature of featureValues) {
           scanFeature(
-            features[index] as JsonValue,
+            feature as JsonValue,
             appendPointer(featuresPath, index),
             index,
             state,
           );
+          index += 1;
         }
       }
     } else if (rootType === 'Feature') {
@@ -976,6 +1137,7 @@ export function scanGeoJSON(
         options.listener?.geometry?.(geometrySummary(metrics));
       }
     } else {
+      if (requirements.featureByteSpans) state.featureByteStatsPartial = true;
       damage(state, ...semanticFacts);
       report(
         state,
@@ -1027,7 +1189,11 @@ export function scanGeoJSON(
           requirements.geographicExtents,
           'derivedExtent',
         ),
-        featureByteStats: 'not-computed',
+        featureByteStats: !requirements.featureByteSpans
+          ? 'not-computed'
+          : state.featureByteStatsPartial
+            ? 'partial'
+            : 'complete',
       },
     },
     ...(requirements.exactFileBytes && options.sourceBytes !== undefined
@@ -1037,6 +1203,9 @@ export function scanGeoJSON(
     totalVertices: requirements.vertexCounts ? state.totalVertices : 0,
     ...(requirements.vertexCounts
       ? { largestFeatureVertices: state.largestFeatureVertices }
+      : {}),
+    ...(requirements.featureByteSpans
+      ? { largestFeatureBytes: state.largestFeatureBytes }
       : {}),
     ...(requirements.featureGeometryTypes
       ? {

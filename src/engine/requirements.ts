@@ -41,12 +41,15 @@ export interface ExecutionRequirements {
   readonly propertyStats: boolean;
   readonly idStats: boolean;
   readonly exactFileBytes: boolean;
+  readonly featureByteSpans: boolean;
 }
 
 export interface RequirementOptions {
   readonly facts?: readonly SummaryFactName[];
   readonly listener?: SemanticListener;
   readonly exactFileBytes?: boolean;
+  readonly numericLexemes?: boolean;
+  readonly featureByteSpans?: boolean;
 }
 
 export function createExecutionRequirements(
@@ -61,7 +64,8 @@ export function createExecutionRequirements(
   const vertexCounts = facts.has('vertexCount');
   const coordinateDimensions = facts.has('coordinateDimensionStats');
   const geographicExtents = facts.has('derivedExtent');
-  const numericLexemes = Boolean(listener?.coordinateLexeme);
+  const numericLexemes =
+    options.numericLexemes ?? Boolean(listener?.coordinateLexeme);
 
   return Object.freeze({
     geometrySummaries,
@@ -90,6 +94,7 @@ export function createExecutionRequirements(
     idStats,
     numericLexemes,
     exactFileBytes: options.exactFileBytes ?? false,
+    featureByteSpans: options.featureByteSpans ?? false,
   });
 }
 

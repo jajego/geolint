@@ -1,6 +1,11 @@
 import type { GeoLintConfig } from './types/config.js';
 
-export { lintGeoJSON, lintGeoJSONText } from './engine/lint-input.js';
+export { lintFile, lintGeoJSON, lintGeoJSONText } from './engine/lint-input.js';
+export type {
+  FileLintOptions,
+  InMemoryLintOptions,
+  ParserStrategy,
+} from './engine/lint-input.js';
 export {
   GeoLintBatchError,
   GeoLintCapabilityError,

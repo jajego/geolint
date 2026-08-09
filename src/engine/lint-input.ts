@@ -1,7 +1,14 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import { resolveFileConfig } from '../config/resolve.js';
 import { resolveRuntimeConfig } from '../config/runtime.js';
 import { assertJsonValue } from '../input/json-value.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
+import {
+  IndexedSyntaxError,
+  parseIndexedSource,
+} from '../parser/indexed-source.js';
 import { DiagnosticCollector } from './diagnostics.js';
 import { compilePolicy, type CompiledPolicy } from './policy.js';
 import { createExecutionRequirements } from './requirements.js';
@@ -20,10 +27,22 @@ import type {
   SkippedPolicy,
   SummaryFactName,
 } from '../types/semantic.js';
-import { GeoLintInputError } from './errors.js';
+import {
+  GeoLintCapabilityError,
+  GeoLintIOError,
+  GeoLintInputError,
+} from './errors.js';
+import type { ExecutionRequirements } from './requirements.js';
+
+export type ParserStrategy = 'auto' | 'buffered' | 'indexed';
 
 export interface InMemoryLintOptions extends GeoLintRuntimeContext {
   readonly filename?: string;
+  readonly parser?: ParserStrategy;
+}
+
+export interface FileLintOptions extends GeoLintRuntimeContext {
+  readonly parser?: ParserStrategy;
 }
 
 async function inputContext(options: InMemoryLintOptions): Promise<{
@@ -59,18 +78,32 @@ function fileResult(
   };
 }
 
-function scanResult(
-  value: JsonValue,
-  collector: DiagnosticCollector,
+function requirementsFor(
   policy: CompiledPolicy,
-  startedAt: number,
-  sourceBytes?: number,
-): FileLintResult {
+  sourceBytesAvailable: boolean,
+): ExecutionRequirements {
   const facts = new Set<SummaryFactName>([
     'featureCount',
     'vertexCount',
     ...policy.facts,
   ]);
+  return createExecutionRequirements({
+    facts: [...facts],
+    ...(policy.listener ? { listener: policy.listener } : {}),
+    exactFileBytes: policy.exactFileBytes || sourceBytesAvailable,
+    numericLexemes: policy.numericLexemes,
+    featureByteSpans: policy.featureByteSpans,
+  });
+}
+
+function scanResult(
+  value: JsonValue,
+  collector: DiagnosticCollector,
+  policy: CompiledPolicy,
+  startedAt: number,
+  requirements: ExecutionRequirements,
+  sourceBytes?: number,
+): FileLintResult {
   const summary = scanGeoJSON(value, {
     filePath: collector.filePath,
     diagnostics: collector,
@@ -78,14 +111,16 @@ function scanResult(
     ...(policy.coordinateObservation
       ? { coordinateObservation: policy.coordinateObservation }
       : {}),
+    ...(policy.coordinateLexemeObservation
+      ? { coordinateLexemeObservation: policy.coordinateLexemeObservation }
+      : {}),
     ...(policy.featureIdObservation
       ? { featureIdObservation: policy.featureIdObservation }
       : {}),
-    requirements: createExecutionRequirements({
-      facts: [...facts],
-      ...(policy.listener ? { listener: policy.listener } : {}),
-      exactFileBytes: policy.exactFileBytes || sourceBytes !== undefined,
-    }),
+    ...(policy.featureByteObservation
+      ? { featureByteObservation: policy.featureByteObservation }
+      : {}),
+    requirements,
     ...(sourceBytes === undefined ? {} : { sourceBytes }),
   });
   return fileResult(collector, startedAt, summary, policy.finish(summary));
@@ -125,28 +160,76 @@ export async function lintGeoJSONText(
     collector,
     baseline,
   );
-  const parsed = parseBufferedJSON(text);
-  if (!parsed.ok) {
+  const requirements = requirementsFor(policy, true);
+  const parser = options.parser ?? 'auto';
+  if (
+    parser === 'buffered' &&
+    (requirements.numericLexemes || requirements.featureByteSpans)
+  ) {
+    throw new GeoLintCapabilityError(
+      `The buffered parser cannot satisfy ${requirements.numericLexemes ? 'numeric-lexeme' : 'Feature-span'} requirements. Use parser "auto" or "indexed".`,
+      requirements.numericLexemes
+        ? 'GEOLINT_CAPABILITY_NUMERIC_LEXEMES'
+        : 'GEOLINT_CAPABILITY_FEATURE_BYTES',
+    );
+  }
+  const strategy =
+    parser === 'indexed' ||
+    (parser === 'auto' &&
+      (requirements.numericLexemes || requirements.featureByteSpans))
+      ? 'indexed'
+      : 'buffered';
+  if (strategy === 'buffered') {
+    const parsed = parseBufferedJSON(text);
+    if (!parsed.ok) {
+      collector.report({
+        code: 'parse/invalid-json',
+        source: 'parser',
+        message: 'Input is not valid JSON.',
+      });
+      return fileResult(collector, startedAt);
+    }
+    return scanResult(
+      parsed.value,
+      collector,
+      policy,
+      startedAt,
+      requirements,
+      Buffer.byteLength(text, 'utf8'),
+    );
+  }
+  try {
+    const parsed = parseIndexedSource(text, requirements);
+    return scanResult(
+      parsed.value,
+      collector,
+      policy,
+      startedAt,
+      requirements,
+      parsed.sourceBytes,
+    );
+  } catch (error) {
+    if (!(error instanceof IndexedSyntaxError)) throw error;
     collector.report({
       code: 'parse/invalid-json',
       source: 'parser',
       message: 'Input is not valid JSON.',
+      byteOffset: error.byteOffset,
     });
     return fileResult(collector, startedAt);
   }
-  return scanResult(
-    parsed.value,
-    collector,
-    policy,
-    startedAt,
-    Buffer.byteLength(text, 'utf8'),
-  );
 }
 
 export async function lintGeoJSON(
   value: unknown,
   options: InMemoryLintOptions = {},
 ): Promise<FileLintResult> {
+  if (options.parser === 'indexed') {
+    throw new GeoLintCapabilityError(
+      'Parser "indexed" requires source text and is unavailable for lintGeoJSON(value).',
+      'GEOLINT_CAPABILITY_INDEXED_SOURCE',
+    );
+  }
   const startedAt = performance.now();
   const context = await inputContext(options);
   const collector = new DiagnosticCollector(
@@ -162,5 +245,46 @@ export async function lintGeoJSON(
     baseline,
   );
   assertJsonValue(value);
-  return scanResult(value, collector, policy, startedAt);
+  return scanResult(
+    value,
+    collector,
+    policy,
+    startedAt,
+    requirementsFor(policy, false),
+  );
+}
+
+export async function lintFile(
+  path: string,
+  options: FileLintOptions = {},
+): Promise<FileLintResult> {
+  const absolutePath = resolve(options.cwd ?? process.cwd(), path);
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(absolutePath);
+  } catch (cause) {
+    throw new GeoLintIOError(
+      `Could not read GeoJSON file at ${absolutePath}.`,
+      'GEOLINT_FILE_READ_FAILED',
+      { cause },
+    );
+  }
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    const startedAt = performance.now();
+    const context = await inputContext({ ...options, filename: absolutePath });
+    const collector = new DiagnosticCollector(
+      context.filePath,
+      context.config.diagnostics,
+    );
+    collector.report({
+      code: 'parse/invalid-encoding',
+      source: 'parser',
+      message: 'Input is not valid UTF-8.',
+    });
+    return fileResult(collector, startedAt);
+  }
+  return lintGeoJSONText(text, { ...options, filename: absolutePath });
 }

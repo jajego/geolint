@@ -340,7 +340,7 @@ test('rule options reject unknown, out-of-range, and meaningless values', async 
   }
 });
 
-test('source-aware policies fail capability preflight for both input APIs', async () => {
+test('source-aware policies run for text and reject object input', async () => {
   for (const options of [
     { config: { rules: { 'coordinate-precision': 'error' as const } } },
     { config: { budgets: { feature: { bytes: '5KB' } } } },
@@ -349,10 +349,11 @@ test('source-aware policies fail capability preflight for both input APIs', asyn
       lintGeoJSON(feature(1, {}), options),
       (error) => error instanceof GeoLintCapabilityError,
     );
-    await assert.rejects(
-      lintGeoJSONText(JSON.stringify(feature(1, {})), options),
-      (error) => error instanceof GeoLintCapabilityError,
+    const result = await lintGeoJSONText(
+      JSON.stringify(feature(1, {})),
+      options,
     );
+    assert.equal(result.errorCount, 0);
   }
 
   const cyclic: Record<string, unknown> = {};
@@ -538,12 +539,10 @@ test('recommended and web presets resolve exact V5 membership', async () => {
     'no-null-geometry': 'warn',
     'coordinate-precision': ['warn', { maximumDecimals: 6 }],
   });
-  await assert.rejects(
-    lintGeoJSONText(JSON.stringify(feature(1, {})), {
-      config: { extends: ['geolint/web'] },
-    }),
-    GeoLintCapabilityError,
-  );
+  const result = await lintGeoJSONText(JSON.stringify(feature(1, {})), {
+    config: { extends: ['geolint/web'] },
+  });
+  assert.equal(result.errorCount, 0);
 });
 
 test('resolved file overrides disable and change recommended rules', async () => {

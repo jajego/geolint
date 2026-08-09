@@ -13,6 +13,10 @@ import {
 } from '../regression/schema.js';
 import { compileRegression } from '../regression/compare.js';
 import { baselineEntryFromSummary } from '../regression/snapshot.js';
+import {
+  parseIndexedSource,
+  type IndexedInstrumentation,
+} from '../parser/indexed-source.js';
 
 interface Fixture {
   readonly name: string;
@@ -501,4 +505,100 @@ console.log(
     `${Math.round(malformedCount / (malformedElapsed / 1_000)).toLocaleString('en-US')} positions/s ` +
     `${diagnostics.diagnostics.length}/${diagnostics.errorCount} kept/errors ` +
     `${instrumentation.coordinatePathMaterializations} paths`,
+);
+
+console.log(
+  '\nphase-6 end-to-end                 buffered  indexed      web  feature  combined',
+);
+for (const [name, , sourceFactory] of policyFixtures.filter(([fixture]) =>
+  [
+    'points-100k',
+    'points-1m',
+    'small-features-10k',
+    'wide-properties-10k',
+    'unique-ids-10k',
+  ].includes(fixture),
+)) {
+  const source = sourceFactory();
+  const run = async (
+    parser: 'auto' | 'buffered' | 'indexed',
+    config: GeoLintConfig,
+  ) => {
+    const startedAt = performance.now();
+    await lintGeoJSONText(source, { parser, config });
+    return performance.now() - startedAt;
+  };
+  const buffered = await run('buffered', {
+    extends: ['geolint/recommended'],
+  });
+  const indexed = await run('indexed', {
+    extends: ['geolint/recommended'],
+  });
+  const web = await run('auto', { extends: ['geolint/web'] });
+  const featureBytes = await run('auto', {
+    extends: ['geolint/recommended'],
+    budgets: { feature: { bytes: '1GiB' } },
+  });
+  const combined = await run('auto', {
+    extends: ['geolint/web'],
+    budgets: { feature: { bytes: '1GiB' } },
+  });
+  console.log(
+    `${name.padEnd(34)} ${buffered.toFixed(1).padStart(8)} ${indexed.toFixed(1).padStart(8)} ${web.toFixed(1).padStart(8)} ${featureBytes.toFixed(1).padStart(8)} ${combined.toFixed(1).padStart(9)}`,
+  );
+}
+
+function indexedInstrumentation(): IndexedInstrumentation {
+  return {
+    sourceBytes: 0,
+    validationMs: 0,
+    rootIndexMs: 0,
+    indexedObjects: 0,
+    winningSpans: 0,
+    coordinateSpans: 0,
+    sourceBytesReplayed: 0,
+  };
+}
+
+function benchmarkIndexedSource(name: string, source: string): void {
+  const requirements = createExecutionRequirements({ facts: ['vertexCount'] });
+  const index = indexedInstrumentation();
+  const heapBefore = process.memoryUsage().heapUsed;
+  const parsed = parseIndexedSource(source, requirements, index);
+  const heapAfterIndex = process.memoryUsage().heapUsed;
+  const scanInstrumentation: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+  };
+  const semanticStarted = performance.now();
+  scanGeoJSON(parsed.value, {
+    filePath: '<benchmark>',
+    requirements,
+    instrumentation: scanInstrumentation,
+  });
+  const semanticMs = performance.now() - semanticStarted;
+  const heapAfterSemantic = process.memoryUsage().heapUsed;
+  console.log(
+    `${name} bytes=${index.sourceBytes} index=${(index.validationMs + index.rootIndexMs).toFixed(1)}ms ` +
+      `semantic=${semanticMs.toFixed(1)}ms visits=${scanInstrumentation.positionVisits} ` +
+      `spans=${index.coordinateSpans} objects=${index.indexedObjects} ` +
+      `heap-index=${Math.round((heapAfterIndex - heapBefore) / 1024)}KiB ` +
+      `heap-semantic=${Math.round((heapAfterSemantic - heapAfterIndex) / 1024)}KiB`,
+  );
+}
+
+const hostileCoordinates = Array.from(
+  { length: 100_000 },
+  (_, index) => `[${index % 180},${index % 90}]`,
+).join(',');
+console.log('\nphase-6 indexed source detail');
+benchmarkIndexedSource(
+  'huge-losing',
+  `{"type":"MultiPoint","coordinates":[${hostileCoordinates}],"coordinates":[[1,2]]}`,
+);
+benchmarkIndexedSource(
+  'huge-winning',
+  `{"type":"MultiPoint","coordinates":[[1,2]],"coordinates":[${hostileCoordinates}]}`,
 );
