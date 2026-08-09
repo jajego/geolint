@@ -6,8 +6,9 @@ import test from 'node:test';
 
 import {
   lintFile,
-  lintGeoJSON,
+  lintFileWithParser,
   lintGeoJSONText,
+  lintGeoJSONTextWithParser,
 } from '../engine/lint-input.js';
 import { GeoLintCapabilityError } from '../engine/errors.js';
 import {
@@ -19,6 +20,7 @@ import {
   type IndexedInstrumentation,
 } from '../parser/indexed-source.js';
 import { createBaseline, serializeBaseline } from '../regression/schema.js';
+import { snapshotBaseline } from '../regression/snapshot.js';
 import { scanGeoJSON, type ScanInstrumentation } from '../scanner/scan.js';
 import type { GeoLintConfig } from '../types/config.js';
 import type { FileLintResult, JsonValue } from '../types/semantic.js';
@@ -33,15 +35,33 @@ async function assertParity(
   source: string,
   config: GeoLintConfig | string = {},
 ) {
-  const buffered = await lintGeoJSONText(source, {
+  const buffered = await lintGeoJSONTextWithParser(source, {
     config,
     parser: 'buffered',
   });
-  const indexed = await lintGeoJSONText(source, {
+  const indexed = await lintGeoJSONTextWithParser(source, {
     config,
     parser: 'indexed',
   });
   assert.deepEqual(stable(indexed), stable(buffered));
+}
+
+function nestedArray(depth: number, value = '0'): string {
+  return `${'['.repeat(depth)}${value}${']'.repeat(depth)}`;
+}
+
+function nestedObject(depth: number, value = '0'): string {
+  return `${'{"x":'.repeat(depth)}${value}${'}'.repeat(depth)}`;
+}
+
+function mixedNesting(depth: number): string {
+  const openings = Array.from({ length: depth }, (_, index) =>
+    index % 2 === 0 ? '[' : '{"x":',
+  );
+  const closings = openings
+    .toReversed()
+    .map((opening) => (opening === '[' ? ']' : '}'));
+  return `${openings.join('')}0${closings.join('')}`;
 }
 
 function internalScan(
@@ -277,7 +297,60 @@ test('indexed syntax validation is fatal before semantic execution', async () =>
     "['x']",
     '/* comment */ []',
   ]) {
-    const result = await lintGeoJSONText(source, {
+    const result = await lintGeoJSONTextWithParser(source, {
+      parser: 'indexed',
+      config: {},
+    });
+    assert.deepEqual(
+      result.diagnostics.map(({ code }) => code),
+      ['parse/invalid-json'],
+    );
+    assert.equal(result.summary, undefined);
+  }
+});
+
+test('indexed syntax traversal is stack-safe for deeply nested valid JSON', async () => {
+  const values = [
+    nestedArray(20_000),
+    nestedObject(10_000),
+    mixedNesting(12_000),
+  ];
+  for (const value of values) {
+    const source = `{"type":"Feature","properties":{"deep":${value}},"geometry":null}`;
+    await assertParity(source);
+  }
+
+  const losing = `{"type":"Feature","properties":{"deep":${nestedArray(10_000)},"deep":0},"geometry":null}`;
+  const winning = `{"type":"Feature","properties":{"deep":0,"deep":${nestedObject(10_000)}},"geometry":null}`;
+  await assertParity(losing);
+  await assertParity(winning);
+
+  let losingValue: JsonValue | undefined;
+  internalScan(losing, {
+    propertyValue(event) {
+      losingValue = event.value;
+    },
+  });
+  assert.equal(losingValue, 0);
+  let winningValue: JsonValue | undefined;
+  internalScan(winning, {
+    propertyValue(event) {
+      winningValue = event.value;
+    },
+  });
+  assert.equal(typeof winningValue, 'object');
+});
+
+test('deep malformed JSON reports parse/invalid-json without stack errors', async () => {
+  const malformed = [
+    nestedArray(12_000).slice(0, -1),
+    nestedObject(12_000).slice(0, -1),
+    nestedArray(12_000, '?'),
+    `{"type":"Feature","properties":{"deep":${nestedArray(10_000, '?')},"deep":0},"geometry":null}`,
+    `{"type":"Feature","properties":{"deep":0,"deep":${nestedObject(10_000, '?')}},"geometry":null}`,
+  ];
+  for (const source of malformed) {
+    const result = await lintGeoJSONTextWithParser(source, {
       parser: 'indexed',
       config: {},
     });
@@ -495,14 +568,10 @@ test('source policies compose, forced buffered rejects, and object input remains
     { budgets: { feature: { bytes: '1KB' } } },
   ]) {
     await assert.rejects(
-      lintGeoJSONText(source, { parser: 'buffered', config }),
+      lintGeoJSONTextWithParser(source, { parser: 'buffered', config }),
       GeoLintCapabilityError,
     );
   }
-  await assert.rejects(
-    lintGeoJSON(JSON.parse(source), { parser: 'indexed', config: {} }),
-    GeoLintCapabilityError,
-  );
 });
 
 test('web preset runs source-backed with precision, ordinary findings, and overrides', async () => {
@@ -608,13 +677,13 @@ test('semantic budgets and regression remain identical across strategies', async
         },
       },
     };
-    const buffered = await lintGeoJSONText(source, {
+    const buffered = await lintGeoJSONTextWithParser(source, {
       cwd: directory,
       filename: 'map.geojson',
       config,
       parser: 'buffered',
     });
-    const indexed = await lintGeoJSONText(source, {
+    const indexed = await lintGeoJSONTextWithParser(source, {
       cwd: directory,
       filename: 'map.geojson',
       config,
@@ -654,6 +723,144 @@ test('lintFile matches text source semantics and rejects invalid UTF-8 before sc
   }
 });
 
+test('source decoding preserves BOM for consistent JSON rejection', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'geolint-bom-'));
+  try {
+    const source = '\uFEFF{"type":"Point","coordinates":[1,2]}';
+    const path = join(directory, 'map.geojson');
+    await writeFile(path, source);
+    for (const parser of ['buffered', 'indexed'] as const) {
+      const text = await lintGeoJSONTextWithParser(source, {
+        parser,
+        filename: path,
+        cwd: directory,
+        config: {},
+      });
+      const file = await lintFileWithParser(path, {
+        parser,
+        cwd: directory,
+        config: {},
+      });
+      assert.deepEqual(
+        text.diagnostics.map(({ code }) => code),
+        ['parse/invalid-json'],
+      );
+      assert.deepEqual(stable(file), stable(text));
+    }
+    await assert.rejects(
+      snapshotBaseline({
+        cwd: directory,
+        targets: ['map.geojson'],
+        config: { regression: { baseline: 'baseline.json' } },
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'GEOLINT_SNAPSHOT_INVALID_JSON',
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('raw source bytes, offsets, Feature spans, snapshot, and regression agree', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'geolint-source-truth-'));
+  try {
+    const feature =
+      '{"type":"Feature","properties":{"label":"🗺️"},"geometry":{"type":"Point","coordinates":[1.0000000,2]}}';
+    const source = ` \r\n${feature}\n`;
+    const path = join(directory, 'map.geojson');
+    const bytes = Buffer.byteLength(source, 'utf8');
+    const featureBytes = Buffer.byteLength(feature, 'utf8');
+    await writeFile(path, source);
+    const snapshot = await snapshotBaseline({
+      cwd: directory,
+      targets: ['map.geojson'],
+      config: { regression: { baseline: 'baseline.json' } },
+    });
+    assert.equal(snapshot.baseline.files['map.geojson']?.bytes, bytes);
+
+    const result = await lintFile(path, {
+      cwd: directory,
+      config: {
+        rules: {
+          'coordinate-precision': ['error', { maximumDecimals: 6 }],
+        },
+        budgets: { feature: { bytes: `${featureBytes}B` } },
+        regression: {
+          baseline: 'baseline.json',
+          thresholds: { fileSizeIncrease: { minimumIncrease: '0B' } },
+        },
+      },
+    });
+    assert.equal(result.summary?.bytes, bytes);
+    assert.equal(result.summary?.largestFeatureBytes, featureBytes);
+    assert.equal(
+      result.diagnostics.find(({ code }) => code === 'coordinate-precision')
+        ?.byteOffset,
+      Buffer.byteLength(source.slice(0, source.indexOf('[1.0000000')), 'utf8'),
+    );
+    assert.equal(
+      result.diagnostics.some(({ code }) => code === 'regression/file-size'),
+      false,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('indexed Feature spans do not allocate unrequested numeric lexemes', () => {
+  const source =
+    '{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[1.0000000,2]}}';
+  const featureOnly = createExecutionRequirements({
+    facts: ['vertexCount'],
+    featureByteSpans: true,
+  });
+  const parsed = parseIndexedSource(source, featureOnly);
+  const noLexemes: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+    rawLexemeCollections: 0,
+    coordinateLexemeEvents: 0,
+  };
+  scanGeoJSON(parsed.value, {
+    filePath: 'map.geojson',
+    requirements: featureOnly,
+    instrumentation: noLexemes,
+  });
+  assert.equal(noLexemes.positionVisits, 1);
+  assert.equal(noLexemes.rawLexemeCollections, 0);
+  assert.equal(noLexemes.coordinateLexemeEvents, 0);
+
+  let observed: readonly string[] = [];
+  const listener: SemanticListener = {
+    coordinateLexeme(event) {
+      observed = event.rawValues;
+    },
+  };
+  const withLexemes = createExecutionRequirements({ listener });
+  const lexemeParsed = parseIndexedSource(source, withLexemes);
+  const lexemes: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+    rawLexemeCollections: 0,
+    coordinateLexemeEvents: 0,
+  };
+  scanGeoJSON(lexemeParsed.value, {
+    filePath: 'map.geojson',
+    requirements: withLexemes,
+    listener,
+    instrumentation: lexemes,
+  });
+  assert.deepEqual(observed, ['1.0000000', '2']);
+  assert.equal(lexemes.rawLexemeCollections, 1);
+  assert.equal(lexemes.coordinateLexemeEvents, 1);
+});
+
 test('hostile losing coordinates retain one span and visit only winning positions', () => {
   const losing = Array.from(
     { length: 10_000 },
@@ -662,8 +869,8 @@ test('hostile losing coordinates retain one span and visit only winning position
   const source = `{"type":"MultiPoint","coordinates":[${losing}],"coordinates":[[1,2]]}`;
   const index: IndexedInstrumentation = {
     sourceBytes: 0,
-    validationMs: 0,
-    rootIndexMs: 0,
+    syntaxValidationMs: 0,
+    initialIndexReplayMs: 0,
     indexedObjects: 0,
     winningSpans: 0,
     coordinateSpans: 0,
@@ -683,6 +890,7 @@ test('hostile losing coordinates retain one span and visit only winning position
     instrumentation: scan,
   });
   assert.equal(index.coordinateSpans, 1);
+  assert.equal(index.indexedObjects, 1);
   assert.equal(scan.positionVisits, 1);
   assert.equal(summary.totalVertices, 1);
 });

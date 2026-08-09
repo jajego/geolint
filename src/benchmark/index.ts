@@ -1,4 +1,7 @@
-import { lintGeoJSONText } from '../engine/lint-input.js';
+import {
+  lintGeoJSONText,
+  lintGeoJSONTextWithParser,
+} from '../engine/lint-input.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -508,7 +511,7 @@ console.log(
 );
 
 console.log(
-  '\nphase-6 end-to-end                 buffered  indexed      web  feature  combined',
+  '\nphase-6 end-to-end                 buffered  indexed precision  feature  combined',
 );
 for (const [name, , sourceFactory] of policyFixtures.filter(([fixture]) =>
   [
@@ -525,7 +528,7 @@ for (const [name, , sourceFactory] of policyFixtures.filter(([fixture]) =>
     config: GeoLintConfig,
   ) => {
     const startedAt = performance.now();
-    await lintGeoJSONText(source, { parser, config });
+    await lintGeoJSONTextWithParser(source, { parser, config });
     return performance.now() - startedAt;
   };
   const buffered = await run('buffered', {
@@ -534,25 +537,29 @@ for (const [name, , sourceFactory] of policyFixtures.filter(([fixture]) =>
   const indexed = await run('indexed', {
     extends: ['geolint/recommended'],
   });
-  const web = await run('auto', { extends: ['geolint/web'] });
+  const precision = await run('auto', {
+    extends: ['geolint/recommended'],
+    rules: { 'coordinate-precision': 'error' },
+  });
   const featureBytes = await run('auto', {
     extends: ['geolint/recommended'],
     budgets: { feature: { bytes: '1GiB' } },
   });
   const combined = await run('auto', {
-    extends: ['geolint/web'],
+    extends: ['geolint/recommended'],
+    rules: { 'coordinate-precision': 'error' },
     budgets: { feature: { bytes: '1GiB' } },
   });
   console.log(
-    `${name.padEnd(34)} ${buffered.toFixed(1).padStart(8)} ${indexed.toFixed(1).padStart(8)} ${web.toFixed(1).padStart(8)} ${featureBytes.toFixed(1).padStart(8)} ${combined.toFixed(1).padStart(9)}`,
+    `${name.padEnd(34)} ${buffered.toFixed(1).padStart(8)} ${indexed.toFixed(1).padStart(8)} ${precision.toFixed(1).padStart(8)} ${featureBytes.toFixed(1).padStart(8)} ${combined.toFixed(1).padStart(9)}`,
   );
 }
 
 function indexedInstrumentation(): IndexedInstrumentation {
   return {
     sourceBytes: 0,
-    validationMs: 0,
-    rootIndexMs: 0,
+    syntaxValidationMs: 0,
+    initialIndexReplayMs: 0,
     indexedObjects: 0,
     winningSpans: 0,
     coordinateSpans: 0,
@@ -581,7 +588,8 @@ function benchmarkIndexedSource(name: string, source: string): void {
   const semanticMs = performance.now() - semanticStarted;
   const heapAfterSemantic = process.memoryUsage().heapUsed;
   console.log(
-    `${name} bytes=${index.sourceBytes} index=${(index.validationMs + index.rootIndexMs).toFixed(1)}ms ` +
+    `${name} bytes=${index.sourceBytes} syntax=${index.syntaxValidationMs.toFixed(1)}ms ` +
+      `initial-replay=${index.initialIndexReplayMs.toFixed(1)}ms ` +
       `semantic=${semanticMs.toFixed(1)}ms visits=${scanInstrumentation.positionVisits} ` +
       `spans=${index.coordinateSpans} objects=${index.indexedObjects} ` +
       `heap-index=${Math.round((heapAfterIndex - heapBefore) / 1024)}KiB ` +

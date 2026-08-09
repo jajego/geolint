@@ -19,8 +19,8 @@ export interface SourceSpan {
 
 export interface IndexedInstrumentation {
   sourceBytes: number;
-  validationMs: number;
-  rootIndexMs: number;
+  syntaxValidationMs: number;
+  initialIndexReplayMs: number;
   indexedObjects: number;
   winningSpans: number;
   coordinateSpans: number;
@@ -205,57 +205,84 @@ class Cursor {
     if (character === 't') return this.literal('true', capture);
     if (character === 'f') return this.literal('false', capture);
     if (character === 'n') return this.literal('null', capture);
-    if (character === '[') {
-      this.ascii('[');
+    if (character !== '[' && character !== '{') return this.fail();
+
+    const arrayFirst = 0;
+    const arrayValue = 1;
+    const arrayAfter = 2;
+    const objectFirst = 3;
+    const objectKey = 4;
+    const objectColon = 5;
+    const objectValue = 6;
+    const objectAfter = 7;
+    const kind = character === '[' ? 'array' : 'object';
+    const stack = [character === '[' ? arrayFirst : objectFirst];
+    this.ascii(character);
+
+    const consumeValue = (): void => {
       this.whitespace();
-      if (this.text[this.index] !== ']') {
-        while (true) {
-          this.value(false);
-          this.whitespace();
-          if (this.text[this.index] !== ',') break;
-          this.ascii(',');
-          this.whitespace();
-        }
-      }
-      this.ascii(']');
-      return capture
-        ? {
-            start,
-            end: this.index,
-            startByte,
-            endByteExclusive: this.byte,
-            kind: 'array',
-          }
-        : undefined;
-    }
-    if (character === '{') {
-      this.ascii('{');
+      const next = this.text[this.index];
+      if (next === '"') this.string(false);
+      else if (next === '-' || isDigit(this.text.charCodeAt(this.index)))
+        this.number(false);
+      else if (next === 't') this.literal('true', false);
+      else if (next === 'f') this.literal('false', false);
+      else if (next === 'n') this.literal('null', false);
+      else if (next === '[' || next === '{') {
+        this.ascii(next);
+        stack.push(next === '[' ? arrayFirst : objectFirst);
+      } else this.fail();
+    };
+
+    while (stack.length > 0) {
+      const last = stack.length - 1;
+      const state = stack[last]!;
       this.whitespace();
-      if (this.text[this.index] !== '}') {
-        while (true) {
-          if (this.text[this.index] !== '"') this.fail();
-          this.string(false);
-          this.whitespace();
-          this.ascii(':');
-          this.value(false);
-          this.whitespace();
-          if (this.text[this.index] !== ',') break;
+      if (state <= arrayAfter) {
+        if (state === arrayFirst && this.text[this.index] === ']') {
+          this.ascii(']');
+          stack.pop();
+        } else if (state === arrayFirst || state === arrayValue) {
+          stack[last] = arrayAfter;
+          consumeValue();
+        } else if (this.text[this.index] === ',') {
           this.ascii(',');
-          this.whitespace();
-        }
-      }
-      this.ascii('}');
-      return capture
-        ? {
-            start,
-            end: this.index,
-            startByte,
-            endByteExclusive: this.byte,
-            kind: 'object',
-          }
-        : undefined;
+          stack[last] = arrayValue;
+        } else if (this.text[this.index] === ']') {
+          this.ascii(']');
+          stack.pop();
+        } else this.fail();
+      } else if (state === objectFirst && this.text[this.index] === '}') {
+        this.ascii('}');
+        stack.pop();
+      } else if (state === objectFirst || state === objectKey) {
+        if (this.text[this.index] !== '"') this.fail();
+        this.string(false);
+        stack[last] = objectColon;
+      } else if (state === objectColon) {
+        this.ascii(':');
+        stack[last] = objectValue;
+      } else if (state === objectValue) {
+        stack[last] = objectAfter;
+        consumeValue();
+      } else if (this.text[this.index] === ',') {
+        this.ascii(',');
+        stack[last] = objectKey;
+      } else if (this.text[this.index] === '}') {
+        this.ascii('}');
+        stack.pop();
+      } else this.fail();
     }
-    return this.fail();
+
+    return capture
+      ? {
+          start,
+          end: this.index,
+          startByte,
+          endByteExclusive: this.byte,
+          kind,
+        }
+      : undefined;
   }
 }
 
@@ -372,23 +399,27 @@ function buildProperties(source: IndexedSource, span: IndexedSpan): JsonObject {
   return result;
 }
 
-function buildGeometry(source: IndexedSource, span: IndexedSpan): JsonValue {
+function buildGeometry(
+  source: IndexedSource,
+  span: IndexedSpan,
+  indexed?: ReadonlyMap<string, IndexedSpan>,
+): JsonValue {
   if (span.kind !== 'object') return placeholder(span);
-  const indexed = members(source, span);
-  const type = memberValue(source, indexed, 'type');
+  const values = indexed ?? members(source, span);
+  const type = memberValue(source, values, 'type');
   const result = Object.create(null) as Record<string, JsonValue>;
   if (type !== undefined) result.type = type;
-  const bbox = indexed.get('bbox');
+  const bbox = values.get('bbox');
   if (bbox) result.bbox = decode(source, bbox);
   if (type === 'GeometryCollection') {
-    const geometries = indexed.get('geometries');
+    const geometries = values.get('geometries');
     if (geometries) {
       result.geometries = (geometries.kind === 'array'
         ? sequence(source, geometries, 'geometries')
         : placeholder(geometries)) as unknown as JsonValue;
     }
   } else {
-    const coordinates = indexed.get('coordinates');
+    const coordinates = values.get('coordinates');
     if (coordinates) {
       result.coordinates = (coordinates.kind === 'array'
         ? coordinate(source, coordinates)
@@ -401,23 +432,27 @@ function buildGeometry(source: IndexedSource, span: IndexedSpan): JsonValue {
   return result;
 }
 
-function buildFeature(source: IndexedSource, span: IndexedSpan): JsonValue {
+function buildFeature(
+  source: IndexedSource,
+  span: IndexedSpan,
+  indexed?: ReadonlyMap<string, IndexedSpan>,
+): JsonValue {
   if (span.kind !== 'object') return placeholder(span);
-  const indexed = members(source, span);
-  const type = memberValue(source, indexed, 'type');
+  const values = indexed ?? members(source, span);
+  const type = memberValue(source, values, 'type');
   const result = Object.create(null) as Record<string, JsonValue>;
   if (type !== undefined) result.type = type;
   if (type !== 'Feature') return result;
-  const id = indexed.get('id');
+  const id = values.get('id');
   if (id) {
     result.id =
       id.kind === 'string' || id.kind === 'number'
         ? decode(source, id)
         : placeholder(id);
   }
-  const bbox = indexed.get('bbox');
+  const bbox = values.get('bbox');
   if (bbox) result.bbox = decode(source, bbox);
-  const properties = indexed.get('properties');
+  const properties = values.get('properties');
   if (properties) {
     result.properties =
       properties.kind === 'object'
@@ -426,7 +461,7 @@ function buildFeature(source: IndexedSource, span: IndexedSpan): JsonValue {
           ? null
           : placeholder(properties);
   }
-  const geometry = indexed.get('geometry');
+  const geometry = values.get('geometry');
   if (geometry) {
     result.geometry =
       geometry.kind === 'null' ? null : buildGeometry(source, geometry);
@@ -442,7 +477,7 @@ function buildRoot(source: IndexedSource, span: IndexedSpan): JsonValue {
   if (span.kind !== 'object') return placeholder(span);
   const indexed = members(source, span);
   const type = memberValue(source, indexed, 'type');
-  if (type === 'Feature') return buildFeature(source, span);
+  if (type === 'Feature') return buildFeature(source, span, indexed);
   if (
     typeof type === 'string' &&
     [
@@ -455,7 +490,7 @@ function buildRoot(source: IndexedSource, span: IndexedSpan): JsonValue {
       'GeometryCollection',
     ].includes(type)
   ) {
-    return buildGeometry(source, span);
+    return buildGeometry(source, span, indexed);
   }
   const result = Object.create(null) as Record<string, JsonValue>;
   if (type !== undefined) result.type = type;
@@ -485,7 +520,7 @@ export function parseIndexedSource(
   const validatedAt = performance.now();
   if (instrumentation) {
     instrumentation.sourceBytes = cursor.byte;
-    instrumentation.validationMs = validatedAt - startedAt;
+    instrumentation.syntaxValidationMs = validatedAt - startedAt;
   }
   const source: IndexedSource = {
     text,
@@ -494,7 +529,7 @@ export function parseIndexedSource(
   };
   const value = buildRoot(source, root);
   if (instrumentation) {
-    instrumentation.rootIndexMs = performance.now() - validatedAt;
+    instrumentation.initialIndexReplayMs = performance.now() - validatedAt;
   }
   return { value, sourceBytes: cursor.byte };
 }
@@ -550,10 +585,11 @@ export function indexedCoordinateKind(
 
 export function indexedCoordinateNumber(
   value: IndexedCoordinateValue,
-): { readonly value: number; readonly raw: string } | undefined {
+  includeRaw = false,
+): { readonly value: number; readonly raw?: string } | undefined {
   if (value.span.kind !== 'number') return undefined;
   const raw = value.source.text.slice(value.span.start, value.span.end);
-  return { value: Number(raw), raw };
+  return { value: Number(raw), ...(includeRaw ? { raw } : {}) };
 }
 
 export function indexedCoordinateSpan(

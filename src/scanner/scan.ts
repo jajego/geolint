@@ -108,6 +108,8 @@ export interface ScanInstrumentation {
   positionVisits: number;
   coordinatePathMaterializations: number;
   propertyPathMaterializations: number;
+  rawLexemeCollections?: number;
+  coordinateLexemeEvents?: number;
 }
 
 export interface ScanOptions {
@@ -379,7 +381,11 @@ function* coordinateElements(
   }
 }
 
-function positionValues(value: JsonValue[] | IndexedCoordinateValue):
+function positionValues(
+  value: JsonValue[] | IndexedCoordinateValue,
+  state: ScanState,
+  collectRaw = state.requirements.numericLexemes,
+):
   | {
       readonly values: readonly number[];
       readonly rawValues?: readonly string[];
@@ -399,17 +405,21 @@ function positionValues(value: JsonValue[] | IndexedCoordinateValue):
     return { values: value as number[] };
   }
   const values: number[] = [];
-  const rawValues: string[] = [];
+  const rawValues: string[] | undefined = collectRaw ? [] : undefined;
+  if (rawValues && state.instrumentation) {
+    state.instrumentation.rawLexemeCollections =
+      (state.instrumentation.rawLexemeCollections ?? 0) + 1;
+  }
   for (const ordinate of indexedCoordinateElements(value)) {
-    const number = indexedCoordinateNumber(ordinate);
+    const number = indexedCoordinateNumber(ordinate, collectRaw);
     if (!number || !Number.isFinite(number.value)) return undefined;
     values.push(number.value);
-    rawValues.push(number.raw);
+    if (rawValues) rawValues.push(number.raw!);
   }
   if (values.length < 2) return undefined;
   return {
     values,
-    rawValues,
+    ...(rawValues ? { rawValues } : {}),
     byteOffset: indexedCoordinateSpan(value).startByte,
   };
 }
@@ -427,7 +437,7 @@ function visitPosition(
     invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
     return;
   }
-  const position = positionValues(value);
+  const position = positionValues(value, state);
   if (!position) {
     if (state.instrumentation) state.instrumentation.positionVisits += 1;
     invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
@@ -475,6 +485,10 @@ function visitPosition(
     });
   }
   if (position.rawValues && position.byteOffset !== undefined) {
+    if (state.instrumentation) {
+      state.instrumentation.coordinateLexemeEvents =
+        (state.instrumentation.coordinateLexemeEvents ?? 0) + 1;
+    }
     state.coordinateLexemeObservation?.(
       position.rawValues,
       featureIndex,
@@ -520,16 +534,21 @@ function invalidCoordinates(
 
 function validPositionShape(
   value: CoordinateValue | undefined,
+  state: ScanState,
 ): value is JsonValue[] | IndexedCoordinateValue {
-  return isCoordinateArray(value) && positionValues(value) !== undefined;
+  return (
+    isCoordinateArray(value) &&
+    positionValues(value, state, false) !== undefined
+  );
 }
 
 function positionsEqual(
   left: JsonValue[] | IndexedCoordinateValue,
   right: JsonValue[] | IndexedCoordinateValue,
+  state: ScanState,
 ): boolean {
-  const leftValues = positionValues(left)!.values;
-  const rightValues = positionValues(right)!.values;
+  const leftValues = positionValues(left, state, false)!.values;
+  const rightValues = positionValues(right, state, false)!.values;
   if (leftValues.length !== rightValues.length) return false;
   for (let index = 0; index < leftValues.length; index += 1) {
     if (leftValues[index] !== rightValues[index]) return false;
@@ -572,9 +591,9 @@ function scanLine(
     );
   } else if (
     ring &&
-    validPositionShape(first) &&
-    validPositionShape(last) &&
-    !positionsEqual(first, last)
+    validPositionShape(first, state) &&
+    validPositionShape(last, state) &&
+    !positionsEqual(first, last, state)
   ) {
     invalidCoordinates(
       path,

@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { resolveFileConfig } from '../config/resolve.js';
 import { resolveRuntimeConfig } from '../config/runtime.js';
 import { assertJsonValue } from '../input/json-value.js';
+import { decodeSource } from '../input/decode-source.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
 import {
   IndexedSyntaxError,
@@ -34,15 +35,16 @@ import {
 } from './errors.js';
 import type { ExecutionRequirements } from './requirements.js';
 
-export type ParserStrategy = 'auto' | 'buffered' | 'indexed';
+type ParserStrategy = 'auto' | 'buffered' | 'indexed';
 
 export interface InMemoryLintOptions extends GeoLintRuntimeContext {
   readonly filename?: string;
-  readonly parser?: ParserStrategy;
 }
 
-export interface FileLintOptions extends GeoLintRuntimeContext {
-  readonly parser?: ParserStrategy;
+export type FileLintOptions = GeoLintRuntimeContext;
+
+interface InternalParserOptions {
+  readonly parser: ParserStrategy;
 }
 
 async function inputContext(options: InMemoryLintOptions): Promise<{
@@ -136,9 +138,10 @@ async function regressionBaseline(
   return baseline.files[identity];
 }
 
-export async function lintGeoJSONText(
+async function lintGeoJSONTextUsingParser(
   text: string,
-  options: InMemoryLintOptions = {},
+  options: InMemoryLintOptions,
+  parser: ParserStrategy,
 ): Promise<FileLintResult> {
   if (typeof text !== 'string') {
     throw new GeoLintInputError(
@@ -161,7 +164,6 @@ export async function lintGeoJSONText(
     baseline,
   );
   const requirements = requirementsFor(policy, true);
-  const parser = options.parser ?? 'auto';
   if (
     parser === 'buffered' &&
     (requirements.numericLexemes || requirements.featureByteSpans)
@@ -220,16 +222,24 @@ export async function lintGeoJSONText(
   }
 }
 
+export function lintGeoJSONText(
+  text: string,
+  options: InMemoryLintOptions = {},
+): Promise<FileLintResult> {
+  return lintGeoJSONTextUsingParser(text, options, 'auto');
+}
+
+export function lintGeoJSONTextWithParser(
+  text: string,
+  options: InMemoryLintOptions & InternalParserOptions,
+): Promise<FileLintResult> {
+  return lintGeoJSONTextUsingParser(text, options, options.parser);
+}
+
 export async function lintGeoJSON(
   value: unknown,
   options: InMemoryLintOptions = {},
 ): Promise<FileLintResult> {
-  if (options.parser === 'indexed') {
-    throw new GeoLintCapabilityError(
-      'Parser "indexed" requires source text and is unavailable for lintGeoJSON(value).',
-      'GEOLINT_CAPABILITY_INDEXED_SOURCE',
-    );
-  }
   const startedAt = performance.now();
   const context = await inputContext(options);
   const collector = new DiagnosticCollector(
@@ -254,9 +264,10 @@ export async function lintGeoJSON(
   );
 }
 
-export async function lintFile(
+async function lintFileUsingParser(
   path: string,
-  options: FileLintOptions = {},
+  options: FileLintOptions,
+  parser: ParserStrategy,
 ): Promise<FileLintResult> {
   const absolutePath = resolve(options.cwd ?? process.cwd(), path);
   let bytes: Buffer;
@@ -271,7 +282,7 @@ export async function lintFile(
   }
   let text: string;
   try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    text = decodeSource(bytes);
   } catch {
     const startedAt = performance.now();
     const context = await inputContext({ ...options, filename: absolutePath });
@@ -286,5 +297,23 @@ export async function lintFile(
     });
     return fileResult(collector, startedAt);
   }
-  return lintGeoJSONText(text, { ...options, filename: absolutePath });
+  return lintGeoJSONTextUsingParser(
+    text,
+    { ...options, filename: absolutePath },
+    parser,
+  );
+}
+
+export function lintFile(
+  path: string,
+  options: FileLintOptions = {},
+): Promise<FileLintResult> {
+  return lintFileUsingParser(path, options, 'auto');
+}
+
+export function lintFileWithParser(
+  path: string,
+  options: FileLintOptions & InternalParserOptions,
+): Promise<FileLintResult> {
+  return lintFileUsingParser(path, options, options.parser);
 }

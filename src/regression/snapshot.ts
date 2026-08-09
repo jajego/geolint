@@ -10,6 +10,7 @@ import {
   GeoLintTargetError,
 } from '../engine/errors.js';
 import { createExecutionRequirements } from '../engine/requirements.js';
+import { decodeSource } from '../input/decode-source.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
 import { scanGeoJSON } from '../scanner/scan.js';
 import type { ConfigRuntimeOptions } from '../config/runtime.js';
@@ -143,7 +144,7 @@ async function capture(
   }
   let text: string;
   try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(source);
+    text = decodeSource(source);
   } catch (error) {
     throw new GeoLintInputError(
       `Cannot snapshot ${filePath}: input is not valid UTF-8.`,

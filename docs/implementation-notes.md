@@ -135,17 +135,25 @@ duplicate occurrences cannot exceed present ID occurrences minus one.
 
 ## Phase 6: indexed-source decisions
 
-Semantic-only text remains on the buffered `JSON.parse` path. Numeric lexemes,
-Feature spans, or an explicit indexed override select the owned indexed-source
-cursor. It validates the complete JSON grammar before semantic dispatch, then
-replays only winning members. Coordinate arrays remain source spans and are
-decoded one Position at a time through the shared scanner; no coordinate token
-tree or decoded coordinate graph is retained.
+Semantic-only text remains on the buffered `JSON.parse` path. Numeric lexemes
+or Feature spans select the owned indexed-source cursor. Forced strategy
+selection remains internal test/benchmark infrastructure until the later CLI
+surface is frozen. The cursor validates the complete JSON grammar with an
+explicit container stack before semantic dispatch, then replays only winning
+members. Coordinate arrays remain source spans and are decoded one Position at
+a time through the shared scanner; raw lexeme collections are created only
+when planned, and no coordinate token tree or decoded coordinate graph is
+retained.
 
-The V1 file path reads and fatally validates UTF-8 into one source string before
-indexing. Chunked file replay and stdin temp spooling remain deferred until a
-later source/CLI phase; benchmarks therefore do not justify a semantic-only
-size crossover. Encoded Feature spans are half-open UTF-8 byte ranges excluding
-collection separators and outer document whitespace. Very large negative
+The V1 file and snapshot paths share one fatal UTF-8 decoder that preserves a
+leading BOM. A BOM is therefore visible to the JSON grammar and rejected like
+a leading U+FEFF passed directly to `JSON.parse`; invalid byte sequences remain
+`parse/invalid-encoding`. Chunked file replay and stdin temp spooling remain
+deferred until a later source/CLI phase; benchmarks therefore do not justify a
+semantic-only size crossover. Encoded Feature spans are half-open UTF-8 byte
+ranges excluding collection separators and outer document whitespace. Timing
+instrumentation separates complete syntax validation from the initial eager
+index replay; later lazy replay is included in semantic traversal timing and
+its replayed bytes/object counts remain explicit. Very large negative
 coordinate exponents saturate reported effective decimals at
 `Number.MAX_SAFE_INTEGER`, while threshold comparison remains correct.

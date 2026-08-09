@@ -42,6 +42,17 @@ test('public config types reject override baseline changes', () => {
   });
 });
 
+test('parser strategy remains internal to tests and benchmarks', () => {
+  const typeContract = () => {
+    // @ts-expect-error parser selection is not a stable Node API option
+    void geolint.lintGeoJSONText('{}', { parser: 'indexed' });
+    // @ts-expect-error parser selection is not a stable Node API option
+    void geolint.lintFile('map.geojson', { parser: 'buffered' });
+  };
+  void typeContract;
+  assert.equal('ParserStrategy' in geolint, false);
+});
+
 test('semantic event types expose only their promised capability', () => {
   const property = (event: geolint.PropertyEvent) => {
     // @ts-expect-error property() does not provide the value
