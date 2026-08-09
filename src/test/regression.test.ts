@@ -8,6 +8,7 @@ import { DiagnosticCollector } from '../engine/diagnostics.js';
 import {
   GeoLintCapabilityError,
   GeoLintInternalError,
+  GeoLintTargetError,
 } from '../engine/errors.js';
 import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
 import { compileRegression } from '../regression/compare.js';
@@ -369,7 +370,9 @@ test('ordinary lint requires stable identity and loads baseline by filename', as
         cwd: directory,
         config: { regression: config },
       }),
-      GeoLintCapabilityError,
+      (error) =>
+        error instanceof GeoLintTargetError &&
+        error.code === 'GEOLINT_UNSTABLE_REGRESSION_IDENTITY',
     );
 
     const absent = await lintGeoJSON(

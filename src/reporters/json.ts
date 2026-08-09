@@ -27,17 +27,17 @@ function project(value: unknown, seen: Set<object>): unknown {
       if (entries.some(([key]) => typeof key !== 'string')) {
         throw new TypeError('GeoLint JSON output requires string Map keys.');
       }
-      return Object.fromEntries(
-        entries
-          .sort(([left], [right]) =>
-            String(left) < String(right)
-              ? -1
-              : String(left) > String(right)
-                ? 1
-                : 0,
-          )
-          .map(([key, entry]) => [key, project(entry, seen)]),
-      );
+      const output = Object.create(null) as Record<string, unknown>;
+      for (const [key, entry] of entries.sort(([left], [right]) =>
+        String(left) < String(right)
+          ? -1
+          : String(left) > String(right)
+            ? 1
+            : 0,
+      )) {
+        output[key] = project(entry, seen);
+      }
+      return output;
     }
     if (Array.isArray(value)) {
       return value.map((entry) => project(entry, seen));
@@ -46,7 +46,7 @@ function project(value: unknown, seen: Set<object>): unknown {
     if (prototype !== Object.prototype && prototype !== null) {
       throw new TypeError('GeoLint JSON output requires plain data objects.');
     }
-    const output: Record<string, unknown> = {};
+    const output = Object.create(null) as Record<string, unknown>;
     for (const key of Object.keys(value)) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !('value' in descriptor)) {

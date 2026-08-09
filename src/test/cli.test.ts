@@ -428,6 +428,49 @@ export default {
   }
 });
 
+test('JSON CLI preserves hostile plugin diagnostic data keys', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geolint-cli-json-data-'));
+  const publicUrl = new URL('../index.js', import.meta.url).href;
+  try {
+    await writeFile(
+      join(root, 'map.geojson'),
+      JSON.stringify({ type: 'Point', coordinates: [0, 0] }),
+    );
+    await writeFile(
+      join(root, 'geolint.config.ts'),
+      `import { definePlugin, defineRule } from ${JSON.stringify(publicUrl)};
+const data = Object.create(null);
+Object.defineProperty(data, '__proto__', { enumerable: true, value: { expected: true } });
+data.constructor = 'constructor';
+data.prototype = 'prototype';
+const plugin = definePlugin({
+  meta: { apiVersion: 1 },
+  rules: {
+    hostile: defineRule({
+      meta: { name: 'hostile', schema: null },
+      create(context) {
+        return { document() { context.report({ message: 'hostile', data }); } };
+      },
+    }),
+  },
+});
+export default { plugins: { acme: plugin }, rules: { 'acme/hostile': 'error' } };
+`,
+    );
+    const output = runResult(['--format', 'json', 'map.geojson'], {
+      cwd: root,
+    });
+    assert.equal(output.status, 1);
+    assert.equal(output.stderr, '');
+    const data = JSON.parse(output.stdout).files[0].diagnostics[0].data;
+    assert.deepEqual(data.__proto__, { expected: true });
+    assert.equal(data.constructor, 'constructor');
+    assert.equal(data.prototype, 'prototype');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('source-aware stdin works and regression stdin requires a filename', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geolint-cli-stdin-'));
   try {
@@ -460,7 +503,7 @@ test('source-aware stdin works and regression stdin requires a filename', async 
       input: '{"type":"Point","coordinates":[0,0]}',
     });
     assert.equal(regression.status, 2);
-    assert.match(regression.stderr, /GEOLINT_CAPABILITY_REGRESSION_IDENTITY/);
+    assert.match(regression.stderr, /GEOLINT_UNSTABLE_REGRESSION_IDENTITY/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

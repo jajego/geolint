@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { normalizeFilePath } from '../config/resolve.js';
-import { GeoLintCapabilityError, GeoLintIOError } from '../engine/errors.js';
+import { GeoLintIOError, GeoLintTargetError } from '../engine/errors.js';
 import { regressionIdentity } from '../regression/baseline-io.js';
 import {
   createBaseline,
@@ -125,9 +125,16 @@ test('regression identities are stable project-relative paths', () => {
   assert.equal(regressionIdentity('public/map.geojson'), 'public/map.geojson');
   assert.throws(
     () => regressionIdentity('../outside.geojson'),
-    GeoLintCapabilityError,
+    (error) =>
+      error instanceof GeoLintTargetError &&
+      error.code === 'GEOLINT_UNSTABLE_REGRESSION_IDENTITY',
   );
-  assert.throws(() => regressionIdentity('<memory>'), GeoLintCapabilityError);
+  assert.throws(
+    () => regressionIdentity('<memory>'),
+    (error) =>
+      error instanceof GeoLintTargetError &&
+      error.code === 'GEOLINT_UNSTABLE_REGRESSION_IDENTITY',
+  );
 });
 
 test('baseline parser rejects noncanonical persisted file keys', () => {

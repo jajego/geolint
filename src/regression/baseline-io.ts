@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
-import { GeoLintCapabilityError, GeoLintIOError } from '../engine/errors.js';
+import { GeoLintIOError, GeoLintTargetError } from '../engine/errors.js';
 import type { ResolvedConfig } from '../types/config.js';
 import {
   createBaseline,
@@ -27,9 +27,9 @@ export function regressionIdentity(filePath: string): string {
     isAbsolute(filePath) ||
     /^[A-Za-z]:\//.test(filePath)
   ) {
-    throw new GeoLintCapabilityError(
+    throw new GeoLintTargetError(
       'Regression requires a filename that resolves beneath the project root.',
-      'GEOLINT_CAPABILITY_REGRESSION_IDENTITY',
+      'GEOLINT_UNSTABLE_REGRESSION_IDENTITY',
     );
   }
   return filePath.replaceAll('\\', '/');
