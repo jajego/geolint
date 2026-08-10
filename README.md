@@ -1,5 +1,9 @@
 # GeoLint
 
+[![CI](https://github.com/jajego/geolint/actions/workflows/ci.yml/badge.svg)](https://github.com/jajego/geolint/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@jajego/geolint?label=npm)](https://www.npmjs.com/package/@jajego/geolint)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Quality gates for production GeoJSON.**
 
 GeoLint catches data-quality issues, enforces size and complexity budgets, and detects unintended changes in the GeoJSON your project ships.
