@@ -381,6 +381,64 @@ test('semantic regression diagnostics show property transitions and null counts'
   });
 });
 
+test('ID regression diagnostics show counts and compare dimensions independently', () => {
+  const config: RegressionConfig = {
+    checks: {
+      duplicateIds: { increased: 'error' },
+      missingIds: { increased: 'warn' },
+    },
+  };
+  const regressed = evaluate(
+    config,
+    current({
+      ids: {
+        present: 1,
+        missing: 1,
+        duplicateCount: 1,
+        stringCount: 1,
+        numberCount: 0,
+      },
+    }),
+    baseline({
+      ids: { missing: 0, duplicates: 0, string: 1, number: 0 },
+    }),
+  );
+  assert.deepEqual(
+    regressed.diagnostics.diagnostics.map(({ message }) => message),
+    [
+      'Duplicate ID count increased: 0 → 1.',
+      'Missing ID count increased: 0 → 1.',
+    ],
+  );
+  assert.deepEqual(
+    regressed.diagnostics.diagnostics.map(({ data }) => data),
+    [
+      { baseline: 0, current: 1 },
+      { baseline: 0, current: 1 },
+    ],
+  );
+
+  const independent = evaluate(
+    config,
+    current({
+      ids: {
+        present: 1,
+        missing: 1,
+        duplicateCount: 1,
+        stringCount: 1,
+        numberCount: 0,
+      },
+    }),
+    baseline({
+      ids: { missing: 1, duplicates: 0, string: 1, number: 0 },
+    }),
+  );
+  assert.deepEqual(
+    independent.diagnostics.diagnostics.map(({ code }) => code),
+    ['regression/duplicate-ids-increased'],
+  );
+});
+
 test('high-cardinality regression findings use shared diagnostic limits', () => {
   const diagnostics = new DiagnosticCollector('map.geojson', {
     maxPerCodePerFile: 2,

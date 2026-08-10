@@ -343,6 +343,14 @@ function addCountPolicy(
   });
 }
 
+function countIncreaseMessage(
+  label: string,
+  baseline: number,
+  current: number,
+): string {
+  return `${label} increased: ${baseline.toLocaleString('en-US')} → ${current.toLocaleString('en-US')}.`;
+}
+
 export function compileRegression(
   config: RegressionConfig,
   inputKind: InputKind,
@@ -366,6 +374,8 @@ export function compileRegression(
     baseline: (entry) => entry.ids.duplicates,
     current: (summary) => summary.ids!.duplicateCount,
     label: 'Duplicate ID count',
+    message: (baseline, current) =>
+      countIncreaseMessage('Duplicate ID count', baseline, current),
   });
   addCountPolicy(policies, diagnostics, {
     code: 'regression/missing-ids-increased',
@@ -374,6 +384,8 @@ export function compileRegression(
     baseline: (entry) => entry.ids.missing,
     current: (summary) => summary.ids!.missing,
     label: 'Missing ID count',
+    message: (baseline, current) =>
+      countIncreaseMessage('Missing ID count', baseline, current),
   });
   addCountPolicy(policies, diagnostics, {
     code: 'regression/null-geometries-increased',
@@ -383,7 +395,7 @@ export function compileRegression(
     current: (summary) => summary.nullGeometryCount!,
     label: 'Null geometry count',
     message: (baseline, current) =>
-      `Null geometry count increased: ${baseline.toLocaleString('en-US')} → ${current.toLocaleString('en-US')}.`,
+      countIncreaseMessage('Null geometry count', baseline, current),
   });
   const facts = [...new Set(policies.flatMap((policy) => policy.requires))];
   return {
