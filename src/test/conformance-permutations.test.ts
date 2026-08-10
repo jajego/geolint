@@ -9,7 +9,7 @@ import type { JsonValue } from '../types/semantic.js';
 import {
   assertOrdinaryEquivalence,
   permuteObjects,
-} from './torture-harness.js';
+} from './conformance-harness.js';
 
 const point = (coordinates: readonly number[]): JsonValue => ({
   type: 'Point',

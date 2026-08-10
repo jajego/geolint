@@ -9,7 +9,7 @@ import type { GeoLintConfig } from '../types/config.js';
 import {
   assertOrdinaryEquivalence,
   stableProjectedExecution,
-} from './torture-harness.js';
+} from './conformance-harness.js';
 
 const recoveryConfig: GeoLintConfig = {
   extends: ['geolint/recommended'],
@@ -116,7 +116,7 @@ test('diagnostic retention changes representation but not semantic facts', async
 
 test('numeric, categorical, no-baseline, and incomplete regression remain equivalent', async () => {
   const directory = await mkdtemp(
-    join(tmpdir(), 'geolint-torture-regression-'),
+    join(tmpdir(), 'geolint-conformance-regression-'),
   );
   try {
     await writeFile(

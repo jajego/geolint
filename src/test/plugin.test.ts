@@ -22,7 +22,7 @@ import { compilePolicy } from '../engine/policy.js';
 import { createExecutionRequirements } from '../engine/requirements.js';
 import { scanGeoJSON, type ScanInstrumentation } from '../scanner/scan.js';
 import externalPlugin, { namedPlugin } from './fixtures/external-plugin.js';
-import { assertOrdinaryEquivalence } from './torture-harness.js';
+import { assertOrdinaryEquivalence } from './conformance-harness.js';
 
 const propertyAllowlist = defineRule({
   meta: {

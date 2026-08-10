@@ -16,7 +16,7 @@ import type { GeoLintConfig } from '../types/config.js';
 import {
   assertEquivalentSources,
   assertOrdinaryEquivalence,
-} from './torture-harness.js';
+} from './conformance-harness.js';
 
 const feature = (members: string): string =>
   `{"type":"Feature",${members},"properties":{},"geometry":null}`;

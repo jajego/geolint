@@ -18,7 +18,7 @@ import type {
   SummaryFactName,
 } from '../types/semantic.js';
 
-export const tortureFacts = [
+export const conformanceFacts = [
   'featureCount',
   'vertexCount',
   'propertyStats',
@@ -28,7 +28,7 @@ export const tortureFacts = [
   'derivedExtent',
 ] as const satisfies readonly SummaryFactName[];
 
-export interface TortureCase {
+export interface ConformanceCase {
   readonly source: string;
   readonly fixture: string;
   readonly seed?: number;
@@ -37,7 +37,7 @@ export interface TortureCase {
   readonly cwd?: string;
 }
 
-function context(test: TortureCase, strategies: string): string {
+function context(test: ConformanceCase, strategies: string) {
   const reproduction =
     test.source.length <= 500
       ? test.source
@@ -116,7 +116,7 @@ function trace(
     feature: (event) => events.push(['feature', event]),
   };
   const requirements = createExecutionRequirements({
-    facts: tortureFacts,
+    facts: conformanceFacts,
     listener,
   });
   const value = indexed
@@ -131,7 +131,7 @@ function trace(
 }
 
 export async function stableProjectedExecution(
-  test: TortureCase,
+  test: ConformanceCase,
   parser: 'buffered' | 'indexed',
 ): Promise<unknown> {
   const result = await lintGeoJSONTextWithParser(test.source, {
@@ -148,7 +148,7 @@ export async function stableProjectedExecution(
 }
 
 export async function assertOrdinaryEquivalence(
-  test: TortureCase,
+  test: ConformanceCase,
 ): Promise<void> {
   const options = {
     filename: 'map.geojson',
@@ -213,7 +213,7 @@ export function permuteObjects(value: JsonValue, seed: number): JsonValue {
 }
 
 export async function assertEquivalentSources(
-  actual: TortureCase,
+  actual: ConformanceCase,
   expectedSource: string,
 ): Promise<void> {
   const expected = { ...actual, source: expectedSource };

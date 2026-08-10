@@ -17,7 +17,7 @@ import {
   assertOrdinaryEquivalence,
   ordinaryProjection,
   seededRandom,
-} from './torture-harness.js';
+} from './conformance-harness.js';
 
 test('numeric JSON grammar and exact coordinate lexemes match JSON.parse', async () => {
   const spellings = [

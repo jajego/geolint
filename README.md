@@ -1,12 +1,10 @@
 # GeoLint
 
-GeoLint checks the GeoJSON your project ships. Run it in CI to catch data-quality problems, control artifact size and complexity, and detect unintended changes before they reach production.
+**Quality gates for production GeoJSON.**
 
-It is built for files generated during builds, exported from data pipelines, committed to repositories, or served directly to browsers. Start with recommended checks; add project-specific budgets and regression baselines when they are useful.
+GeoLint catches data-quality issues, enforces size and complexity budgets, and detects unintended changes in the GeoJSON your project ships.
 
-GeoLint is a fast, TypeScript-native, ESLint-style tool that checks structural sanity, quality rules, delivery budgets, and optional regression baselines.
-
-## Try it
+## Getting started
 
 ```sh
 npx geolint map.geojson
@@ -14,7 +12,7 @@ npx geolint map.geojson
 
 No config is required. With no discovered config, GeoLint applies `geolint/recommended` immediately.
 
-For a duplicate Feature ID, the pretty reporter looks like this:
+Example output:
 
 ```text
 map.geojson
@@ -26,16 +24,14 @@ map.geojson
 ✖ 1 error, 0 warnings
 ```
 
-The duration varies; the diagnostic and summary format are real GeoLint output.
-
-For repeatable local and CI use:
+Install GeoLint in your project:
 
 ```sh
 npm install --save-dev geolint
 npx geolint "public/**/*.geojson"
 ```
 
-## What it checks
+## Core concepts
 
 | Concern    | Question                                        | GeoLint capability |
 | ---------- | ----------------------------------------------- | ------------------ |
@@ -47,7 +43,7 @@ npx geolint "public/**/*.geojson"
 
 Quality rules catch production problems such as missing or duplicate Feature IDs, property/type drift, unexpected geometry patterns, invalid coordinate ranges, and inconsistent coordinate dimensions. Source-aware rules can also enforce coordinate precision.
 
-Recommended rules cover useful consistency checks out of the box. Add a config when your project needs a more specific policy:
+The recommended preset provides useful consistency checks out of the box. Add a config when your project needs a more specific policy:
 
 ```js
 // geolint.config.mjs
@@ -66,7 +62,7 @@ export default defineConfig({
 
 ### Budgets
 
-A perfectly valid artifact can still become several times larger or more expensive for a browser to parse and render. Budgets make file size, Feature count, total vertices, and per-Feature complexity reviewable policy.
+A perfectly valid artifact can still become several times larger or more expensive for a browser to parse and render. Budgets turn file size, Feature count, total vertices, and per-Feature complexity into explicit policy.
 
 These are example project-specific limits, not universal recommendations:
 
@@ -95,7 +91,7 @@ npx geolint "public/**/*.geojson"
 
 Quality, budgets, and regression work independently, but together they turn GeoJSON into a testable build artifact: quality catches inconsistency, budgets catch delivery cost, and baselines catch unexpected change over time.
 
-## Make it a CI gate
+## CI integration
 
 ```json
 {
@@ -107,9 +103,7 @@ Quality, budgets, and regression work independently, but together they turn GeoJ
 
 Exit status is `0` when policy passes, `1` for lint, budget, or regression findings (including too many warnings), and `2` for operational failures. JSON output is schema-versioned and suitable for build tooling.
 
-Use GeoLint when your GeoJSON is generated during builds, exported from data pipelines, committed to a repository, served to browsers, or expected to remain structurally stable.
-
-## Use it from Node
+## Node API
 
 GeoLint is ESM-only, requires Node.js 22 or newer, and exposes a typed Node API:
 
@@ -117,6 +111,7 @@ GeoLint is ESM-only, requires Node.js 22 or newer, and exposes a typed Node API:
 import { lintGeoJSONText } from 'geolint';
 
 const result = await lintGeoJSONText(source, { filename: 'map.geojson' });
+
 for (const diagnostic of result.diagnostics) {
   console.log(diagnostic.code, diagnostic.message);
 }
@@ -130,7 +125,7 @@ GeoLint automatically chooses buffered or source-aware analysis according to the
 
 GeoLint catches important structural problems, but it is not a topology engine, geometry repair tool, spatial database, or replacement for a domain-specific GIS validator. It adds production policy around the GeoJSON artifacts you ship.
 
-## Learn more
+## Documentation
 
 - [Configuration and CLI](docs/configuration.md) — config discovery, presets, targets, and output
 - [Rules](docs/rules.md) — built-in quality checks and options

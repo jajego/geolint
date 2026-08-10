@@ -6,11 +6,11 @@ GeoLint requires Node.js 22 or newer and npm.
 npm ci
 npm run check
 npm test
-npm run test:torture
+npm run test:conformance
 npm run build
 ```
 
-`npm run check` runs TypeScript, ESLint, dependency-boundary/cycle checks, and dead-code analysis. `npm run test:torture` is the Semantic Conformance Suite; parser, scanner, recovery, ordering, or source-fact changes need focused conformance coverage.
+`npm run check` runs TypeScript, ESLint, dependency-boundary/cycle checks, and dead-code analysis. `npm run test:conformance` is the Semantic Conformance Suite; parser, scanner, recovery, ordering, or source-fact changes need focused conformance coverage.
 
 Run `npm run benchmark` for performance-sensitive changes. Use the extended and worker benchmarks when memory, parser strategy, or parallel execution is affected, and explain material changes in the pull request.
 
