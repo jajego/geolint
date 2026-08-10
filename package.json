@@ -1,11 +1,14 @@
 {
   "name": "geolint",
   "version": "0.0.0",
-  "description": "Fast, TypeScript-native quality and regression linting for GeoJSON.",
+  "description": "Quality gates for production GeoJSON: data quality, delivery budgets, and regression checks.",
   "keywords": [
     "geojson",
     "lint",
+    "linter",
     "geospatial",
+    "gis",
+    "quality",
     "typescript",
     "ci"
   ],
