@@ -13,6 +13,10 @@ npm run benchmark:compare -- baseline.json current.json 20
 
 The standard suite is the normal development and CI check. The extended suite adds dedicated child-process peak-RSS measurements. Either suite accepts `--output benchmark-results/name.json`; generated JSON artifacts are ignored by Git. CI writes the standard artifact and uploads it from the Ubuntu job.
 
+## Source-aware policies
+
+Ordinary semantic policies use the cheaper buffered strategy. Policies that need exact source facts, such as coordinate numeric lexemes for `coordinate-precision`, use source-aware indexed analysis and can be materially slower on large coordinate-heavy files. GeoLint selects the cheapest correct strategy automatically.
+
 ## Methodology
 
 Fixtures are deterministic and generated before timed regions. Member-order randomization uses a fixed seed. Every warm in-process case, including indexed detail, buffered detail, and multi-rule traversal instrumentation, runs one complete discarded warmup before fresh per-sample instrumentation is collected. Inputs of at least 5 MB use three measured samples and smaller inputs use five; the median is primary. Fixture byte counts are computed before timing.

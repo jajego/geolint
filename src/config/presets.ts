@@ -13,8 +13,6 @@ const recommended: GeoLintConfig = Object.freeze({
 const web: GeoLintConfig = Object.freeze({
   extends: ['geolint/recommended'],
   rules: Object.freeze({
-    'require-feature-id': 'warn',
-    'consistent-geometry-types': 'warn',
     'no-null-geometry': 'warn',
     'coordinate-precision': ['warn', { maximumDecimals: 6 }] as const,
   }),

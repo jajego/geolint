@@ -29,7 +29,7 @@ import type {
   SummaryFactName,
 } from '../types/semantic.js';
 import type { DiagnosticCollector } from './diagnostics.js';
-import { parseByteSize } from './byte-size.js';
+import { formatByteSize, parseByteSize } from './byte-size.js';
 import {
   GeoLintCapabilityError,
   GeoLintConfigError,
@@ -431,7 +431,7 @@ function compileRules(
               severity: compiled.severity,
             },
             () => ({
-              message: 'Coordinate precision exceeds its configured limit.',
+              message: `Coordinate precision is ${maximumObserved} ${maximumObserved === 1 ? 'decimal' : 'decimals'} (max ${maximumDecimals}).`,
               ...(featureIndex === undefined ? {} : { featureIndex }),
               path:
                 positionIndex === undefined
@@ -676,7 +676,7 @@ function compileBudgets(
             diagnostics,
             'budget/file-size',
             fileSize.severity,
-            'File size exceeds its configured budget.',
+            `File size is ${formatByteSize(summary.bytes!)} (budget ${formatByteSize(fileSize.limit)}).`,
             summary.bytes!,
             fileSize.limit,
           );
@@ -702,7 +702,7 @@ function compileBudgets(
             diagnostics,
             'budget/feature-count',
             featureCount.severity,
-            'Feature count exceeds its configured budget.',
+            `Feature count is ${summary.featureCount.toLocaleString('en-US')} (budget ${featureCount.limit.toLocaleString('en-US')}).`,
             summary.featureCount,
             featureCount.limit,
           );
@@ -728,7 +728,7 @@ function compileBudgets(
             diagnostics,
             'budget/total-vertices',
             totalVertices.severity,
-            'Total vertices exceed their configured budget.',
+            `Total vertices are ${summary.totalVertices.toLocaleString('en-US')} (budget ${totalVertices.limit.toLocaleString('en-US')}).`,
             summary.totalVertices,
             totalVertices.limit,
           );

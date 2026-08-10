@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createLintResult } from '../engine/lint-files.js';
-import { lintGeoJSON } from '../engine/lint-input.js';
+import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
 import { formatJson, jsonProjection } from '../reporters/json.js';
 import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
@@ -100,6 +100,21 @@ test('pretty reporter pluralizes vertices', async () => {
 
   assert.match(output, /1 vertex/);
   assert.doesNotMatch(output, /vertexs/);
+});
+
+test('pretty reporter renders coordinate precision context from the rule message', async () => {
+  const file = await lintGeoJSONText(
+    '{"type":"Point","coordinates":[-116.5986666666667,34.1]}',
+    {
+      config: {
+        rules: { 'coordinate-precision': ['warn', { maximumDecimals: 6 }] },
+      },
+    },
+  );
+  assert.match(
+    formatPretty(createLintResult([file], 0)),
+    /Coordinate precision is 13 decimals \(max 6\)\./,
+  );
 });
 
 test('JSON reporter preserves hostile own keys without mutating prototypes', () => {

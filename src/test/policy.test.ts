@@ -408,6 +408,10 @@ test('file-size budget requires source bytes and uses exact UTF-8 size', async (
   });
   assert.equal(over.diagnostics.at(-1)?.code, 'budget/file-size');
   assert.equal(over.diagnostics.at(-1)?.severity, 'warning');
+  assert.equal(
+    over.diagnostics.at(-1)?.message,
+    `File size is ${exact.toLocaleString('en-US')} B (budget ${(exact - 1).toLocaleString('en-US')} B).`,
+  );
   assert.deepEqual(over.diagnostics.at(-1)?.data, {
     actual: exact,
     limit: exact - 1,
@@ -436,6 +440,10 @@ test('aggregate count budgets enforce > boundaries and skip partial facts', asyn
   assert.deepEqual(
     over.diagnostics.map(({ severity }) => severity),
     ['warning', 'error'],
+  );
+  assert.deepEqual(
+    over.diagnostics.map(({ message }) => message),
+    ['Feature count is 2 (budget 1).', 'Total vertices are 2 (budget 1).'],
   );
 
   const partial = await lint(
@@ -534,15 +542,64 @@ test('recommended and web presets resolve exact V5 membership', async () => {
   });
   assert.deepEqual(web.rules, {
     ...defaults.rules,
-    'require-feature-id': 'warn',
-    'consistent-geometry-types': 'warn',
     'no-null-geometry': 'warn',
     'coordinate-precision': ['warn', { maximumDecimals: 6 }],
   });
-  const result = await lintGeoJSONText(JSON.stringify(feature(1, {})), {
+  const mixed = {
+    type: 'FeatureCollection',
+    features: [
+      feature(
+        undefined,
+        {},
+        {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+              [0, 0],
+            ],
+          ],
+        },
+      ),
+      feature(
+        undefined,
+        {},
+        {
+          type: 'MultiPolygon',
+          coordinates: [
+            [
+              [
+                [0, 0],
+                [1, 0],
+                [1, 1],
+                [0, 0],
+              ],
+            ],
+          ],
+        },
+      ),
+    ],
+  } as JsonValue;
+  const result = await lintGeoJSONText(JSON.stringify(mixed), {
     config: { extends: ['geolint/web'] },
   });
   assert.equal(result.errorCount, 0);
+  assert.equal(result.warningCount, 0);
+  const explicit = await lintGeoJSON(mixed, {
+    config: {
+      rules: {
+        'require-feature-id': 'warn',
+        'consistent-geometry-types': 'warn',
+      },
+    },
+  });
+  assert.deepEqual(codes(explicit), [
+    'require-feature-id',
+    'require-feature-id',
+    'consistent-geometry-types',
+  ]);
 });
 
 test('resolved file overrides disable and change recommended rules', async () => {

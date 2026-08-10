@@ -2,6 +2,17 @@
 
 GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stable release, `0.x` changes may refine public contracts and are documented here.
 
+## 0.1.1 - 2026-08-10
+
+### Changed
+
+- Made Feature IDs and uniform geometry types opt-in policies in `geolint/web`.
+- Added observed and configured values to coordinate-precision and artifact-budget diagnostics.
+
+### Documentation
+
+- Clarified the cost of source-aware policies on large coordinate-heavy files.
+
 ## 0.1.0 - 2026-08-10
 
 ### Added

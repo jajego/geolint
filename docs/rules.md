@@ -4,13 +4,13 @@ Rule settings are `off`, `warn`, `error`, or `[severity, options]`. Built-in IDs
 
 | Rule                               | Purpose and options                                                                                                       | Preset            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| `require-feature-id`               | Require every Feature to have an ID.                                                                                      | web warning       |
+| `require-feature-id`               | Require every Feature to have an ID.                                                                                      | opt-in            |
 | `unique-feature-id`                | Reject repeated string or numeric Feature IDs.                                                                            | recommended error |
 | `consistent-feature-id-type`       | Reject documents mixing string and numeric IDs.                                                                           | recommended error |
 | `consistent-property-types`        | Detect properties with inconsistent JSON types. `nullPolicy`: `compatible` (default) or `strict`.                         | recommended error |
 | `consistent-property-presence`     | Require a property presence ratio. Options: `minimumPresenceRatio` (default `1`) and `minimumFeatureCount` (default `1`). | opt-in            |
 | `allowed-geometry-types`           | Restrict geometries with non-empty `allow`, e.g. `['Point', 'Polygon']`.                                                  | opt-in            |
-| `consistent-geometry-types`        | Detect mixed Feature geometry types.                                                                                      | web warning       |
+| `consistent-geometry-types`        | Detect mixed Feature geometry types.                                                                                      | opt-in            |
 | `no-null-geometry`                 | Report Features whose geometry is `null`.                                                                                 | web warning       |
 | `valid-coordinate-range`           | Require longitude in `[-180, 180]` and latitude in `[-90, 90]`.                                                           | recommended error |
 | `consistent-coordinate-dimensions` | Detect mixed 2D, 3D, and 4D+ Positions.                                                                                   | recommended error |

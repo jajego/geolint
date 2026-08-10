@@ -30,7 +30,7 @@ export default defineConfig({
 
 With no discovered or explicit config, GeoLint automatically uses `geolint/recommended`. Once a config exists, it is authoritative: add `extends: ['geolint/recommended']` explicitly to retain those defaults.
 
-`geolint/recommended` enables sensible structural quality checks but no numeric delivery budgets. `geolint/web` extends recommended and adds warnings for missing IDs, mixed geometry types, null geometries, and coordinates exceeding six effective decimal places. Source-aware analysis is selected automatically.
+`geolint/recommended` enables sensible structural quality checks but no numeric delivery budgets. `geolint/web` extends recommended and adds warnings for null geometries and coordinates exceeding six effective decimal places. Source-aware analysis is selected automatically.
 
 Use `--config path` to select a config and `--no-config` to skip discovery. `--print-config file.geojson` prints the resolved JSON-safe policy for one file.
 

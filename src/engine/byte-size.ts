@@ -10,6 +10,12 @@ const byteUnits = Object.freeze({
   GiB: 1_073_741_824,
 });
 
+export function formatByteSize(value: number): string {
+  if (value < 1_000) return `${value} B`;
+  if (value < 1_000_000) return `${(value / 1_000).toFixed(1)} KB`;
+  return `${(value / 1_000_000).toFixed(1)} MB`;
+}
+
 export function parseByteSize(value: unknown, path: string): number {
   if (typeof value !== 'string') {
     throw new GeoLintConfigError(

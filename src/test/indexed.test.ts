@@ -410,6 +410,26 @@ test('coordinate precision uses exact lexemes, all ordinates, and lazy diagnosti
   assert.equal(many.suppressedDiagnostics[0]?.suppressedCount, 998);
 });
 
+test('coordinate precision reports observed and configured decimals', async () => {
+  const result = await lintGeoJSONText(
+    '{"type":"Point","coordinates":[-116.5986666666667,34.1]}',
+    {
+      config: {
+        rules: { 'coordinate-precision': ['warn', { maximumDecimals: 6 }] },
+      },
+    },
+  );
+  assert.equal(
+    result.diagnostics[0]?.message,
+    'Coordinate precision is 13 decimals (max 6).',
+  );
+  assert.deepEqual(result.diagnostics[0]?.data, {
+    maximumDecimals: 6,
+    maximumObserved: 13,
+    offendingToken: '-116.5986666666667',
+  });
+});
+
 test('indexed UTF-8 offsets and raw numeric spelling are exact', () => {
   const source =
     '{\r\n"type":"Feature","properties":{"café":"🗺️","escaped":"\\u00e9"},"geometry":{"type":"Point","coordinates":[181,-0.000000,1E+04]}}';
@@ -583,7 +603,7 @@ test('web preset runs source-backed with precision, ordinary findings, and overr
   });
   assert.deepEqual(
     result.diagnostics.map(({ code }) => code),
-    ['valid-coordinate-range', 'coordinate-precision', 'require-feature-id'],
+    ['valid-coordinate-range', 'coordinate-precision'],
   );
 
   const overridden = await lintGeoJSONText(source, {

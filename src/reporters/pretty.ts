@@ -3,6 +3,7 @@ import type {
   FileLintResult,
   LintResult,
 } from '../types/semantic.js';
+import { formatByteSize } from '../engine/byte-size.js';
 
 export interface PrettyOptions {
   readonly color?: boolean;
@@ -10,12 +11,6 @@ export interface PrettyOptions {
 
 function plural(value: number, singular: string, pluralForm = `${singular}s`) {
   return `${value.toLocaleString('en-US')} ${value === 1 ? singular : pluralForm}`;
-}
-
-function bytes(value: number): string {
-  if (value < 1_000) return `${value} B`;
-  if (value < 1_000_000) return `${(value / 1_000).toFixed(1)} KB`;
-  return `${(value / 1_000_000).toFixed(1)} MB`;
 }
 
 function location(diagnostic: Diagnostic): string {
@@ -66,7 +61,9 @@ function fileLines(file: FileLintResult, color: boolean): string[] {
     const facts = [
       plural(file.summary.featureCount, 'feature'),
       plural(file.summary.totalVertices, 'vertex', 'vertices'),
-      ...(file.summary.bytes === undefined ? [] : [bytes(file.summary.bytes)]),
+      ...(file.summary.bytes === undefined
+        ? []
+        : [formatByteSize(file.summary.bytes)]),
       `${Math.round(file.durationMs)} ms`,
     ];
     lines.push('', `  ${facts.join(' · ')}`);
