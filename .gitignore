@@ -146,4 +146,5 @@ vite.config.ts.timestamp-*
 
 #Docs
 geolint-system-design-v5.web_modules
+geolint-system-design-v5.md
 Implement GeoLint from the V5 System Design.md
