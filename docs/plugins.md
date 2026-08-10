@@ -4,7 +4,7 @@ Plugins add synchronous semantic rules under a user-selected namespace.
 
 ```js
 // geolint-plugin.mjs
-import { definePlugin, defineRule } from 'geolint';
+import { definePlugin, defineRule } from '@jajego/geolint';
 
 const requireId = defineRule({
   meta: { name: 'require-id', schema: null },
@@ -34,7 +34,7 @@ export default definePlugin({
 
 ```js
 // geolint.config.mjs
-import { defineConfig } from 'geolint';
+import { defineConfig } from '@jajego/geolint';
 import projectPlugin from './geolint-plugin.mjs';
 
 export default defineConfig({

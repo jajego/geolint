@@ -6,8 +6,10 @@ GeoLint catches data-quality issues, enforces size and complexity budgets, and d
 
 ## Getting started
 
+Run GeoLint without installing it:
+
 ```sh
-npx geolint map.geojson
+npx @jajego/geolint map.geojson
 ```
 
 No config is required. With no discovered config, GeoLint applies `geolint/recommended` immediately.
@@ -27,7 +29,7 @@ map.geojson
 Install GeoLint in your project:
 
 ```sh
-npm install --save-dev geolint
+npm install --save-dev @jajego/geolint
 npx geolint "public/**/*.geojson"
 ```
 
@@ -47,7 +49,7 @@ The recommended preset provides useful consistency checks out of the box. Add a 
 
 ```js
 // geolint.config.mjs
-import { defineConfig } from 'geolint';
+import { defineConfig } from '@jajego/geolint';
 
 export default defineConfig({
   extends: ['geolint/recommended'],
@@ -108,7 +110,7 @@ Exit status is `0` when policy passes, `1` for lint, budget, or regression findi
 GeoLint is ESM-only, requires Node.js 22 or newer, and exposes a typed Node API:
 
 ```js
-import { lintGeoJSONText } from 'geolint';
+import { lintGeoJSONText } from '@jajego/geolint';
 
 const result = await lintGeoJSONText(source, { filename: 'map.geojson' });
 

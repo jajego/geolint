@@ -1,9 +1,14 @@
 # Node API
 
-GeoLint is ESM-only. All public imports come from `geolint`.
+GeoLint is ESM-only. All public imports come from `@jajego/geolint`.
 
 ```js
-import { lintFile, lintFiles, lintGeoJSON, lintGeoJSONText } from 'geolint';
+import {
+  lintFile,
+  lintFiles,
+  lintGeoJSON,
+  lintGeoJSONText,
+} from '@jajego/geolint';
 
 const valueResult = await lintGeoJSON({ type: 'Point', coordinates: [0, 0] });
 const textResult = await lintGeoJSONText(source, { filename: 'map.geojson' });

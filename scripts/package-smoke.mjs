@@ -43,6 +43,7 @@ try {
     `npm pack did not return JSON:\n${packed.stdout}`,
   );
   const details = JSON.parse(packed.stdout.slice(start))[0];
+  assert.equal(details.name, '@jajego/geolint');
   const paths = details.files.map(({ path }) => path);
   for (const expected of [
     'README.md',
@@ -96,12 +97,13 @@ try {
     ['install', tarball, '--ignore-scripts', '--no-audit', '--no-fund'],
     consumer,
   );
-  assert.equal(
-    JSON.parse(
-      await readFile(join(consumer, 'node_modules', 'geolint', 'package.json')),
-    ).version,
-    packageVersion,
+  const installedPackage = JSON.parse(
+    await readFile(
+      join(consumer, 'node_modules', '@jajego', 'geolint', 'package.json'),
+    ),
   );
+  assert.equal(installedPackage.name, '@jajego/geolint');
+  assert.equal(installedPackage.version, packageVersion);
 
   const valid = { type: 'Point', coordinates: [0, 0] };
   const quality = {
@@ -140,7 +142,7 @@ try {
   await writeFile(
     join(consumer, 'node-api.mjs'),
     `import assert from 'node:assert/strict';
-import { lintGeoJSONText } from 'geolint';
+import { lintGeoJSONText } from '@jajego/geolint';
 const result = await lintGeoJSONText('{"type":"Point","coordinates":[0,0]}');
 assert.equal(result.summary?.totalVertices, 1);
 `,
@@ -149,7 +151,7 @@ assert.equal(result.summary?.totalVertices, 1);
 
   await writeFile(
     join(consumer, 'plugin.mjs'),
-    `import { definePlugin, defineRule } from 'geolint';
+    `import { definePlugin, defineRule } from '@jajego/geolint';
 const nonEmpty = defineRule({
   meta: { name: 'non-empty', schema: null, requires: ['featureCount'] },
   create(context) {
@@ -166,7 +168,7 @@ export default definePlugin({
   );
   await writeFile(
     join(consumer, 'geolint.config.mjs'),
-    `import { defineConfig } from 'geolint';
+    `import { defineConfig } from '@jajego/geolint';
 import demo from './plugin.mjs';
 export default defineConfig({
   plugins: { demo },
@@ -217,8 +219,8 @@ export default defineConfig({
 
   await writeFile(
     join(consumer, 'consumer.ts'),
-    `import { defineConfig, definePlugin, defineRule, lintFiles, lintGeoJSONText } from 'geolint';
-import type { FileLintResult, GeoLintConfig, GeoLintPlugin, LintResult } from 'geolint';
+    `import { defineConfig, definePlugin, defineRule, lintFiles, lintGeoJSONText } from '@jajego/geolint';
+import type { FileLintResult, GeoLintConfig, GeoLintPlugin, LintResult } from '@jajego/geolint';
 const rule = defineRule({ meta: { name: 'typed', schema: null }, create: () => ({}) });
 const plugin: GeoLintPlugin = definePlugin({ meta: { apiVersion: 1 }, rules: { typed: rule } });
 const config: GeoLintConfig = defineConfig({ plugins: { demo: plugin } });

@@ -3,7 +3,7 @@
 GeoLint searches the current directory and then parent directories for, in order, `geolint.config.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs`, or `.json`. TypeScript and module configs are loaded as executable code. The nearest discovered file defines the project root.
 
 ```js
-import { defineConfig } from 'geolint';
+import { defineConfig } from '@jajego/geolint';
 
 export default defineConfig({
   extends: ['geolint/recommended'],
