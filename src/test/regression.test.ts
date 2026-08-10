@@ -321,6 +321,66 @@ test('categorical regression emits stable independent changes with null distinct
   });
 });
 
+test('semantic regression diagnostics show property transitions and null counts', () => {
+  const result = evaluate(
+    {
+      checks: {
+        propertyTypes: {
+          widened: 'error',
+          narrowed: 'error',
+          changed: 'error',
+        },
+        nullGeometries: { increased: 'error' },
+      },
+    },
+    current({
+      propertyStats: new Map([
+        ['name', property(['number'])],
+        ['widened', property(['string', 'null'])],
+        ['narrowed', property(['string'])],
+        ['changed', property(['number', 'null'])],
+      ]),
+      nullGeometryCount: 7,
+    }),
+    baseline({
+      properties: {
+        name: { present: 2, missing: 0, types: { string: 2 } },
+        widened: { present: 2, missing: 0, types: { string: 2 } },
+        narrowed: {
+          present: 2,
+          missing: 0,
+          types: { string: 1, number: 1 },
+        },
+        changed: {
+          present: 2,
+          missing: 0,
+          types: { string: 1, null: 1 },
+        },
+      },
+      nullGeometries: 2,
+    }),
+  );
+  assert.deepEqual(
+    result.diagnostics.diagnostics.map(({ message }) => message),
+    [
+      'Property "widened" types widened: string → string | null.',
+      'Property "narrowed" types narrowed: string | number → string.',
+      'Property "changed" types changed: string | null → number | null.',
+      'Property "name" types changed: string → number.',
+      'Null geometry count increased: 2 → 7.',
+    ],
+  );
+  assert.deepEqual(result.diagnostics.diagnostics.at(-2)?.data, {
+    property: 'name',
+    baselineTypes: ['string'],
+    currentTypes: ['number'],
+  });
+  assert.deepEqual(result.diagnostics.diagnostics.at(-1)?.data, {
+    baseline: 2,
+    current: 7,
+  });
+});
+
 test('high-cardinality regression findings use shared diagnostic limits', () => {
   const diagnostics = new DiagnosticCollector('map.geojson', {
     maxPerCodePerFile: 2,

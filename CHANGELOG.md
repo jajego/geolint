@@ -9,6 +9,7 @@ GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stab
 - Made Feature IDs and uniform geometry types opt-in policies in `geolint/web`.
 - Added observed and configured values to coordinate-precision and artifact-budget diagnostics.
 - Improved threshold regression diagnostics with percentage and approved/current values.
+- Improved property-type and null-geometry regression diagnostics with approved → current values.
 
 ### Documentation
 

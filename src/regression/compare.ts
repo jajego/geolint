@@ -190,6 +190,10 @@ function currentPropertyTypes(
   return propertyTypeOrder.filter((type) => (types.get(type) ?? 0) > 0);
 }
 
+function formatPropertyTypes(types: readonly JsonValueType[]): string {
+  return types.join(' | ');
+}
+
 function relation(
   baseline: ReadonlySet<JsonValueType>,
   current: ReadonlySet<JsonValueType>,
@@ -230,7 +234,7 @@ function addPropertyPolicies(
             direction
           ) {
             report(diagnostics, code, configured, () => ({
-              message: `Property "${property}" types ${direction}.`,
+              message: `Property "${property}" types ${direction}: ${formatPropertyTypes(baselineTypes)} → ${formatPropertyTypes(currentTypes)}.`,
               data: { property, baselineTypes, currentTypes },
             }));
           }
@@ -315,6 +319,7 @@ function addCountPolicy(
     readonly baseline: (entry: BaselineFileEntry) => number;
     readonly current: (summary: FileSummary) => number;
     readonly label: string;
+    readonly message?: (baseline: number, current: number) => string;
   },
 ): void {
   const configured = enabled(options.severity);
@@ -328,7 +333,9 @@ function addCountPolicy(
       const newValue = options.current(summary);
       if (newValue > oldValue) {
         report(diagnostics, options.code, configured, () => ({
-          message: `${options.label} increased from the approved baseline.`,
+          message:
+            options.message?.(oldValue, newValue) ??
+            `${options.label} increased from the approved baseline.`,
           data: { baseline: oldValue, current: newValue },
         }));
       }
@@ -375,6 +382,8 @@ export function compileRegression(
     baseline: (entry) => entry.nullGeometries,
     current: (summary) => summary.nullGeometryCount!,
     label: 'Null geometry count',
+    message: (baseline, current) =>
+      `Null geometry count increased: ${baseline.toLocaleString('en-US')} → ${current.toLocaleString('en-US')}.`,
   });
   const facts = [...new Set(policies.flatMap((policy) => policy.requires))];
   return {
