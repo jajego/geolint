@@ -1,4 +1,4 @@
-import { parseByteSize } from '../engine/byte-size.js';
+import { formatByteSize, parseByteSize } from '../engine/byte-size.js';
 import type { DiagnosticCollector } from '../engine/diagnostics.js';
 import { GeoLintCapabilityError } from '../engine/errors.js';
 import { skipPolicyForIncompleteFacts } from '../engine/requirements.js';
@@ -70,6 +70,11 @@ function changeData(baseline: number, current: number) {
   };
 }
 
+function percentageText(baseline: number, current: number): string {
+  if (baseline === 0) return 'from zero';
+  return `${(Math.abs((current - baseline) / baseline) * 100).toFixed(1)}%`;
+}
+
 function increaseExceeded(
   baseline: number,
   current: number,
@@ -115,7 +120,7 @@ function addNumericPolicies(
           )
         ) {
           report(diagnostics, 'regression/file-size', 'error', () => ({
-            message: 'File size increased beyond its approved threshold.',
+            message: `File size increased ${percentageText(baseline.bytes, current)}: ${formatByteSize(baseline.bytes)} → ${formatByteSize(current)}.`,
             data: changeData(baseline.bytes, current),
           }));
         }
@@ -138,7 +143,7 @@ function addNumericPolicies(
           )
         ) {
           report(diagnostics, 'regression/vertex-count', 'error', () => ({
-            message: 'Vertex count increased beyond its approved threshold.',
+            message: `Vertex count increased ${percentageText(baseline.totalVertices, summary.totalVertices)}: ${baseline.totalVertices.toLocaleString('en-US')} → ${summary.totalVertices.toLocaleString('en-US')}.`,
             data: changeData(baseline.totalVertices, summary.totalVertices),
           }));
         }
@@ -162,7 +167,7 @@ function addNumericPolicies(
           decrease > features.minimumDecrease;
         if (decrease > 0 && percentageExceeded && minimumExceeded) {
           report(diagnostics, 'regression/feature-count', 'error', () => ({
-            message: 'Feature count decreased beyond its approved threshold.',
+            message: `Feature count decreased ${percentageText(baseline.featureCount, summary.featureCount)}: ${baseline.featureCount.toLocaleString('en-US')} → ${summary.featureCount.toLocaleString('en-US')}.`,
             data: {
               baseline: baseline.featureCount,
               current: summary.featureCount,

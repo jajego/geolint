@@ -203,6 +203,60 @@ test('numeric regression thresholds use strict AND boundaries and baseline-zero 
   assert.equal(sizeResult.diagnostics.diagnostics[0]?.severity, 'error');
 });
 
+test('numeric regression diagnostics show the approved and current magnitudes', () => {
+  const approved = baseline({
+    bytes: 14_643_643,
+    featureCount: 258,
+    totalVertices: 548_472,
+  });
+  const result = evaluate(
+    {
+      thresholds: {
+        fileSizeIncrease: { percentage: 1 },
+        featureCountDecrease: { percentage: 1 },
+        totalVerticesIncrease: { percentage: 1 },
+      },
+    },
+    current({
+      bytes: 15_643_643,
+      featureCount: 238,
+      totalVertices: 616_665,
+    }),
+    approved,
+  );
+  assert.deepEqual(
+    result.diagnostics.diagnostics.map(({ message }) => message),
+    [
+      'File size increased 6.8%: 14.6 MB → 15.6 MB.',
+      'Vertex count increased 12.4%: 548,472 → 616,665.',
+      'Feature count decreased 7.8%: 258 → 238.',
+    ],
+  );
+  assert.deepEqual(
+    result.diagnostics.diagnostics.map(({ data }) => data),
+    [
+      {
+        baseline: 14_643_643,
+        current: 15_643_643,
+        delta: 1_000_000,
+        percentage: 6.8289017971825725,
+      },
+      {
+        baseline: 548_472,
+        current: 616_665,
+        delta: 68_193,
+        percentage: 12.43326915503435,
+      },
+      {
+        baseline: 258,
+        current: 238,
+        delta: -20,
+        percentage: 7.751937984496124,
+      },
+    ],
+  );
+});
+
 test('categorical regression emits stable independent changes with null distinct', () => {
   const approved = baseline({
     featureGeometryTypes: { Point: 1, Polygon: 1 },
