@@ -20,7 +20,11 @@ function isUnsafeTerminalCharacter(character: string): boolean {
     codePoint <= 0x1f ||
     (codePoint >= 0x7f && codePoint <= 0x9f) ||
     codePoint === 0x2028 ||
-    codePoint === 0x2029
+    codePoint === 0x2029 ||
+    codePoint === 0x61c ||
+    (codePoint >= 0x200e && codePoint <= 0x200f) ||
+    (codePoint >= 0x202a && codePoint <= 0x202e) ||
+    (codePoint >= 0x2066 && codePoint <= 0x2069)
   );
 }
 
@@ -36,6 +40,6 @@ export function formatTerminalText(value: string): string {
 }
 
 /** Formats an arbitrary semantic value safely for inclusion in prose. */
-export function formatQuotedValue(value: string | number): string {
+export function formatQuotedValue(value: string): string {
   return formatTerminalText(JSON.stringify(value));
 }

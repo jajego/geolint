@@ -16,7 +16,9 @@ function plural(value: number, singular: string, pluralForm = `${singular}s`) {
 
 function location(diagnostic: Diagnostic): string {
   if (diagnostic.featureId !== undefined) {
-    return `id ${formatQuotedValue(diagnostic.featureId)}`;
+    return typeof diagnostic.featureId === 'string'
+      ? `id ${formatQuotedValue(diagnostic.featureId)}`
+      : `id ${formatTerminalText(String(diagnostic.featureId))}`;
   }
   if (diagnostic.featureIndex !== undefined) {
     return `feature[${diagnostic.featureIndex}]`;
@@ -34,7 +36,7 @@ function fileLines(file: FileLintResult, color: boolean): string[] {
     const severity =
       diagnostic.severity === 'error' ? red('error') : yellow('warning');
     lines.push(
-      `  ${location(diagnostic)}  ${severity}  ${formatTerminalText(diagnostic.message)}  ${diagnostic.code}`,
+      `  ${location(diagnostic)}  ${severity}  ${formatTerminalText(diagnostic.message)}  ${formatTerminalText(diagnostic.code)}`,
     );
   }
   for (const item of file.suppressedDiagnostics) {
@@ -42,7 +44,7 @@ function fileLines(file: FileLintResult, color: boolean): string[] {
       ({ code, severity }) => code === item.code && severity === item.severity,
     ).length;
     lines.push(
-      `  ${item.code}  ${shown.toLocaleString('en-US')} shown · ${item.suppressedCount.toLocaleString('en-US')} additional occurrences suppressed`,
+      `  ${formatTerminalText(item.code)}  ${shown.toLocaleString('en-US')} shown · ${item.suppressedCount.toLocaleString('en-US')} additional occurrences suppressed`,
     );
   }
   if (file.skippedPolicies.length > 0) {
@@ -53,8 +55,8 @@ function fileLines(file: FileLintResult, color: boolean): string[] {
     for (const skipped of file.skippedPolicies) {
       lines.push(
         skipped.reason === 'no-baseline'
-          ? `    ${skipped.code} · no baseline exists`
-          : `    ${skipped.code} · incomplete ${skipped.incompleteFacts.join(', ')}`,
+          ? `    ${formatTerminalText(skipped.code)} · no baseline exists`
+          : `    ${formatTerminalText(skipped.code)} · incomplete ${skipped.incompleteFacts.join(', ')}`,
       );
     }
   }

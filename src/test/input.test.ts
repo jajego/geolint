@@ -49,6 +49,22 @@ test('lintGeoJSON rejects a non-finite bbox before structural validation', async
   );
 });
 
+test('lintGeoJSON rejects non-finite Feature IDs and retains finite numeric IDs', async () => {
+  for (const id of [NaN, Infinity, -Infinity]) {
+    await assert.rejects(
+      lintGeoJSON({ ...valid, id }, { config: {} }),
+      (error) =>
+        error instanceof GeoLintInputError &&
+        error.code === 'GEOLINT_INVALID_JSON_VALUE' &&
+        error.message.includes('/id'),
+    );
+  }
+  for (const id of [0, -0, 1, -1, 1.5, 123456]) {
+    const result = await lintGeoJSON({ ...valid, id }, { config: {} });
+    assert.equal(result.errorCount, 0);
+  }
+});
+
 test('lintGeoJSON rejects JavaScript-only values with a stable error', async (context) => {
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;

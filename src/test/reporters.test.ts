@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createLintResult } from '../engine/lint-files.js';
 import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
+import { definePlugin, defineRule } from '../index.js';
 import { formatJson, jsonProjection } from '../reporters/json.js';
 import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
@@ -164,28 +165,110 @@ test('property diagnostics quote hostile names while JSON data stays semantic', 
 });
 
 test('terminal text keeps ordinary Unicode readable and makes controls visible', () => {
-  const value = 'a"b\\c\nhello\tworld\r\u001b[31m\u2028\u2029東京🌋';
+  const value =
+    'a"b\\c\nhello\tworld\r\u001b[31m\u2028\u2029\u061c\u200f\u202e\u2066\u2069東京🌋';
   const display = formatTerminalText(value);
   const quoted = formatQuotedValue(value);
 
   assert.equal(display.includes('東京🌋'), true);
   assert.equal(quoted.includes('東京🌋'), true);
-  for (const control of ['\n', '\r', '\t', '\u001b', '\u2028', '\u2029']) {
+  for (const control of [
+    '\n',
+    '\r',
+    '\t',
+    '\u001b',
+    '\u2028',
+    '\u2029',
+    '\u061c',
+    '\u200f',
+    '\u202e',
+    '\u2066',
+    '\u2069',
+  ]) {
     assert.equal(display.includes(control), false);
     assert.equal(quoted.includes(control), false);
   }
-  assert.match(display, /a"b\\c\\nhello\\tworld\\r\\u001b\[31m\\u2028\\u2029/);
+  assert.match(
+    display,
+    /a"b\\c\\nhello\\tworld\\r\\u001b\[31m\\u2028\\u2029\\u061c\\u200f\\u202e\\u2066\\u2069/,
+  );
   assert.match(
     quoted,
-    /^"a\\"b\\\\c\\nhello\\tworld\\r\\u001b\[31m\\u2028\\u2029東京🌋"$/,
+    /^"a\\"b\\\\c\\nhello\\tworld\\r\\u001b\[31m\\u2028\\u2029\\u061c\\u200f\\u202e\\u2066\\u2069東京🌋"$/,
   );
+});
+
+test('pretty reporter keeps hostile plugin codes semantic but terminal-safe', async () => {
+  const namespace = 'evil\n\u001b[31m\u202e';
+  const localName = 'finding\t\u2066';
+  const code = `${namespace}/${localName}`;
+  const plugin = definePlugin({
+    meta: { apiVersion: 1 },
+    rules: {
+      [localName]: defineRule({
+        meta: { name: localName, schema: null },
+        create(context) {
+          return {
+            document: () => (
+              context.report({ message: 'Plugin result.' }),
+              undefined
+            ),
+          };
+        },
+      }),
+    },
+  });
+  const file = await lintGeoJSON(
+    { type: 'Point', coordinates: [0, 0] },
+    {
+      config: { plugins: { [namespace]: plugin }, rules: { [code]: 'error' } },
+    },
+  );
+  const pretty = formatPretty(createLintResult([file], 0));
+  const json = JSON.parse(formatJson(createLintResult([file], 0))) as {
+    files: { diagnostics: { code: string }[] }[];
+  };
+
+  assert.match(pretty, /evil\\n\\u001b\[31m\\u202e\/finding\\t\\u2066/);
+  for (const control of ['\t', '\u001b', '\u202e', '\u2066'])
+    assert.equal(pretty.includes(control), false);
+  assert.equal(json.files[0]!.diagnostics[0]!.code, code);
+});
+
+test('pretty reporter escapes hostile diagnostic, suppressed, and skipped codes', async () => {
+  const file = await lintGeoJSON(
+    { type: 'Feature', id: null, properties: {}, geometry: null },
+    { config: {} },
+  );
+  const hostile = 'evil\n\u001b[31m\u202e';
+  const output = formatPretty(
+    createLintResult(
+      [
+        {
+          ...file,
+          diagnostics: [{ ...file.diagnostics[0]!, code: hostile }],
+          suppressedDiagnostics: [
+            { code: hostile, severity: 'error', suppressedCount: 1 },
+          ],
+          skippedPolicies: [
+            { code: hostile, source: 'regression', reason: 'no-baseline' },
+          ],
+        },
+      ],
+      0,
+    ),
+  );
+
+  assert.equal(output.includes(hostile), false);
+  assert.match(output, /evil\\n\\u001b\[31m\\u202e/);
+  assert.equal(output.split('\n').length, 12);
 });
 
 test('pretty reporter safely renders hostile paths, messages, and feature IDs', async () => {
   const file = await lintGeoJSON(
     {
       type: 'Feature',
-      id: 'id\n\u001b[31m',
+      id: null,
       properties: {},
       geometry: null,
     },
@@ -213,7 +296,7 @@ test('pretty reporter safely renders hostile paths, messages, and feature IDs', 
   assert.match(output, /id "id\\n\\u001b\[31m"/);
   assert.match(output, /Plugin finding\\n\\u001b\[31m with 東京🌋\./);
   assert.equal(output.includes('\u001b'), false);
-  assert.equal(output.split('\n').length, 8);
+  assert.equal(output.split('\n').length, 11);
 });
 
 test('JSON reporter preserves hostile own keys without mutating prototypes', () => {

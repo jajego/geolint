@@ -171,6 +171,8 @@ source facts. Invalid JSON emits only `parse/invalid-json`.
 Human-facing reporters escape source- and user-controlled terminal control
 characters at the presentation boundary. Built-in prose uses JSON-style quoted
 semantic values; structured JSON reporters preserve the original semantic data.
+The explicit terminal-control list also includes bidi formatting controls that
+could visually reorder report text; ordinary printable Unicode is unchanged.
 
 ## Phase 7: equivalence conformance decisions
 
