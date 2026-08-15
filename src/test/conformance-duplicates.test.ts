@@ -187,6 +187,32 @@ test('source parsers report every decoded duplicate key in source order', async 
   );
 });
 
+test('duplicate-key messages safely render hostile decoded names', async () => {
+  const keys = ['a"b', 'line\nbreak', 'tab\tkey', 'slash\\key', '\u001b'];
+  const source = String.raw`{"type":"Feature","properties":{"a\"b":1,"a\"b":2,"line\nbreak":1,"line\nbreak":2,"tab\tkey":1,"tab\tkey":2,"slash\\key":1,"slash\\key":2,"\u001b":1,"\u001b":2},"geometry":null}`;
+  for (const parser of ['buffered', 'indexed'] as const) {
+    const result = await lintGeoJSONTextWithParser(source, {
+      filename: 'map.geojson',
+      config: {},
+      parser,
+    });
+    const diagnostics = result.diagnostics.filter(
+      ({ code }) => code === 'json/duplicate-key',
+    );
+    assert.equal(diagnostics.length, keys.length);
+    for (const [index, key] of keys.entries()) {
+      const diagnostic = diagnostics[index]!;
+      assert.equal(
+        diagnostic.message,
+        `Duplicate JSON object key ${JSON.stringify(key)}; later value overrides an earlier value.`,
+      );
+      assert.deepEqual(diagnostic.data, { key });
+      assert.equal(diagnostic.message.includes('\n'), false);
+      assert.equal(diagnostic.message.includes('\u001b'), false);
+    }
+  }
+});
+
 test('duplicate winner matrix matches JSON.parse across all semantic levels', async () => {
   for (let index = 0; index < duplicateCases.length; index += 1) {
     const [fixture, source] = duplicateCases[index]!;

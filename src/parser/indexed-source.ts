@@ -1,5 +1,6 @@
 import type { ExecutionRequirements } from '../engine/requirements.js';
 import type { JsonObject, JsonPointer, JsonValue } from '../types/semantic.js';
+import { JsonSourceSyntaxError } from './json-source.js';
 
 type JsonTokenKind =
   'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
@@ -57,11 +58,8 @@ export interface IndexedCoordinateValue {
 
 const featureSpans = new WeakMap<object, SourceSpan>();
 
-export class IndexedSyntaxError extends Error {
-  constructor(readonly byteOffset: number) {
-    super('Input is not valid JSON.');
-  }
-}
+/** @deprecated Internal compatibility alias; source syntax errors are neutral. */
+export class IndexedSyntaxError extends JsonSourceSyntaxError {}
 
 class Cursor {
   index: number;
@@ -595,18 +593,6 @@ export function parseIndexedSource(
     instrumentation.initialIndexReplayMs = performance.now() - validatedAt;
   }
   return { value, sourceBytes: cursor.byte, duplicateKeys };
-}
-
-/** Finds duplicate object keys without retaining an indexed source tree. */
-export function findDuplicateJSONKeys(
-  text: string,
-): readonly DuplicateJsonKey[] {
-  const cursor = new Cursor(text);
-  const duplicateKeys: DuplicateJsonKey[] = [];
-  cursor.value(false, (occurrence) => duplicateKeys.push(occurrence));
-  cursor.whitespace();
-  if (cursor.index !== text.length) cursor.fail();
-  return duplicateKeys;
 }
 
 export function isIndexedSequence(

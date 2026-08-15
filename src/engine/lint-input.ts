@@ -8,10 +8,10 @@ import { decodeSource } from '../input/decode-source.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
 import {
   findDuplicateJSONKeys,
-  IndexedSyntaxError,
-  parseIndexedSource,
   type DuplicateJsonKey,
-} from '../parser/indexed-source.js';
+  JsonSourceSyntaxError,
+} from '../parser/json-source.js';
+import { parseIndexedSource } from '../parser/indexed-source.js';
 import { DiagnosticCollector } from './diagnostics.js';
 import { compilePolicy, type CompiledPolicy } from './policy.js';
 import { createExecutionRequirements } from './requirements.js';
@@ -145,7 +145,7 @@ function reportDuplicateKeys(
     collector.report({
       code: 'json/duplicate-key',
       source: 'parser',
-      message: `Duplicate JSON object key "${key}"; later value overrides an earlier value.`,
+      message: `Duplicate JSON object key ${JSON.stringify(key)}; later value overrides an earlier value.`,
       path,
       byteOffset,
       data: { key },
@@ -235,7 +235,7 @@ function lintResolvedText(
       parsed.sourceBytes,
     );
   } catch (error) {
-    if (!(error instanceof IndexedSyntaxError)) throw error;
+    if (!(error instanceof JsonSourceSyntaxError)) throw error;
     collector.report({
       code: 'parse/invalid-json',
       source: 'parser',
