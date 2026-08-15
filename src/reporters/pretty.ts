@@ -20,7 +20,9 @@ function location(diagnostic: Diagnostic): string {
   if (diagnostic.featureIndex !== undefined) {
     return `feature[${diagnostic.featureIndex}]`;
   }
-  return diagnostic.path || 'artifact';
+  return diagnostic.path
+    ? JSON.stringify(diagnostic.path).slice(1, -1)
+    : 'artifact';
 }
 
 function fileLines(file: FileLintResult, color: boolean): string[] {

@@ -213,6 +213,69 @@ test('duplicate-key messages safely render hostile decoded names', async () => {
   }
 });
 
+test('duplicate equality is exact and object-local', async () => {
+  const composed = String.fromCharCode(0x00e9);
+  const decomposed = `e${String.fromCharCode(0x0301)}`;
+  const source = `{"type":"Feature","properties":{"Name":1,"name":2,"${composed}":3,"${decomposed}":4,"constructor":1,"constructor":2,"items":[{"x":1,"x":2},{"x":3}]},"geometry":null}`;
+  for (const parser of ['buffered', 'indexed'] as const) {
+    const result = await lintGeoJSONTextWithParser(source, {
+      filename: 'map.geojson',
+      config: {},
+      parser,
+    });
+    assert.deepEqual(
+      result.diagnostics.map(({ code, path, data }) => ({ code, path, data })),
+      [
+        {
+          code: 'json/duplicate-key',
+          path: '/properties/constructor',
+          data: { key: 'constructor' },
+        },
+        {
+          code: 'json/duplicate-key',
+          path: '/properties/items/0/x',
+          data: { key: 'x' },
+        },
+      ],
+    );
+  }
+});
+
+test('deep duplicate walking is stack-safe and uses normal suppression', async () => {
+  const nested = `${'['.repeat(2_000)}{"x":1,"x":2}${']'.repeat(2_000)}`;
+  const deepSource = `{"type":"Feature","properties":{"deep":${nested}},"geometry":null}`;
+  const paths: string[] = [];
+  for (const parser of ['buffered', 'indexed'] as const) {
+    const result = await lintGeoJSONTextWithParser(deepSource, {
+      filename: 'map.geojson',
+      config: {},
+      parser,
+    });
+    assert.equal(result.errorCount, 1);
+    paths.push(result.diagnostics[0]!.path!);
+  }
+  assert.equal(paths[0], paths[1]);
+  assert.equal(paths[0]?.endsWith('/x'), true);
+
+  const repeated = `{"type":"Feature","properties":{${Array.from(
+    { length: 10 },
+    (_, index) => `"x":${index}`,
+  ).join(',')}},"geometry":null}`;
+  const limited = await lintGeoJSONTextWithParser(repeated, {
+    parser: 'buffered',
+    config: { diagnostics: { maxPerCodePerFile: 2, maxPerFile: 2 } },
+  });
+  assert.equal(limited.errorCount, 9);
+  assert.equal(limited.diagnostics.length, 2);
+  assert.deepEqual(limited.suppressedDiagnostics, [
+    {
+      code: 'json/duplicate-key',
+      severity: 'error',
+      suppressedCount: 7,
+    },
+  ]);
+});
+
 test('duplicate winner matrix matches JSON.parse across all semantic levels', async () => {
   for (let index = 0; index < duplicateCases.length; index += 1) {
     const [fixture, source] = duplicateCases[index]!;

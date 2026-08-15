@@ -136,7 +136,8 @@ duplicate occurrences cannot exceed present ID occurrences minus one.
 ## Phase 6: indexed-source decisions
 
 Semantic-only text remains on the buffered `JSON.parse` path. Numeric lexemes
-or Feature spans select the owned indexed-source cursor. Forced strategy
+or Feature spans select indexed-source enrichment over the shared iterative
+JSON source cursor. Forced strategy
 selection remains internal test/benchmark infrastructure until the later CLI
 surface is frozen. The cursor validates the complete JSON grammar with an
 explicit container stack before semantic dispatch, then replays only winning
@@ -158,12 +159,12 @@ its replayed bytes/object counts remain explicit. Very large negative
 coordinate exponents saturate reported effective decimals at
 `Number.MAX_SAFE_INTEGER`, while threshold comparison remains correct.
 
-Duplicate-key detection shares the indexed cursor's iterative JSON grammar and
-native string decoding. Buffered linting still uses `JSON.parse` as its value
-authority, then performs only this source walk to recover duplicate-member
-information that parsed JavaScript values cannot preserve. Invalid JSON emits
-only `parse/invalid-json`; indexed lint collects duplicates during its existing
-syntax-validation pass.
+The neutral JSON source cursor owns strict lexical structure, decoded member
+names, iterative nesting, spans, and UTF-8 byte accounting. Buffered linting
+uses it only to recover duplicate-member facts, while `JSON.parse` remains the
+value authority. Indexed lint uses the same cursor once for syntax validation,
+duplicates, and generic spans, then adds winning-member replay and GeoJSON-aware
+source facts. Invalid JSON emits only `parse/invalid-json`.
 
 ## Phase 7: equivalence conformance decisions
 

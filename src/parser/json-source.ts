@@ -3,7 +3,7 @@ import type { JsonPointer } from '../types/semantic.js';
 type JsonTokenKind =
   'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
 
-interface JsonSourceSpan {
+export interface JsonSourceSpan {
   readonly start: number;
   readonly end: number;
   readonly startByte: number;
@@ -17,13 +17,18 @@ export interface DuplicateJsonKey {
   readonly byteOffset: number;
 }
 
+interface SourcePath {
+  readonly parent?: SourcePath;
+  readonly segment: string | number;
+}
+
 export class JsonSourceSyntaxError extends Error {
   constructor(readonly byteOffset: number) {
     super('Input is not valid JSON.');
   }
 }
 
-class JsonSourceCursor {
+export class JsonSourceCursor {
   index: number;
   byte: number;
 
@@ -185,22 +190,23 @@ class JsonSourceCursor {
     const kind = character === '[' ? 'array' : 'object';
     const stack: {
       state: number;
-      path: JsonPointer;
+      path?: SourcePath;
       arrayIndex?: number;
       key?: string;
       keys?: Set<string>;
     }[] = [
       {
         state: character === '[' ? arrayFirst : objectFirst,
-        path: '' as JsonPointer,
         ...(duplicate && character === '[' ? { arrayIndex: 0 } : {}),
         ...(duplicate && character === '{' ? { keys: new Set() } : {}),
       },
     ];
     this.ascii(character);
-    const appendPath = (path: JsonPointer, segment: string | number) =>
-      `${path}/${escapePathSegment(segment)}` as JsonPointer;
-    const consumeValue = (path: JsonPointer): void => {
+    const appendPath = (
+      parent: SourcePath | undefined,
+      segment: string | number,
+    ): SourcePath => ({ ...(parent ? { parent } : {}), segment });
+    const consumeValue = (path?: SourcePath): void => {
       this.whitespace();
       const next = this.text[this.index];
       if (next === '"') this.string(false);
@@ -213,7 +219,7 @@ class JsonSourceCursor {
         this.ascii(next);
         stack.push({
           state: next === '[' ? arrayFirst : objectFirst,
-          path,
+          ...(path ? { path } : {}),
           ...(duplicate && next === '[' ? { arrayIndex: 0 } : {}),
           ...(duplicate && next === '{' ? { keys: new Set() } : {}),
         });
@@ -233,7 +239,7 @@ class JsonSourceCursor {
             const index = frame.arrayIndex!;
             frame.arrayIndex = index + 1;
             consumeValue(appendPath(frame.path, index));
-          } else consumeValue(frame.path);
+          } else consumeValue();
         } else if (this.text[this.index] === ',') {
           this.ascii(',');
           frame.state = arrayValue;
@@ -254,7 +260,7 @@ class JsonSourceCursor {
           if (frame.keys!.has(key))
             duplicate({
               key,
-              path: appendPath(frame.path, key),
+              path: renderPath(appendPath(frame.path, key)),
               byteOffset: keySpan.startByte,
             });
           else frame.keys!.add(key);
@@ -267,7 +273,7 @@ class JsonSourceCursor {
       } else if (state === objectValue) {
         frame.state = objectAfter;
         consumeValue(
-          duplicate ? appendPath(frame.path, frame.key!) : frame.path,
+          duplicate ? appendPath(frame.path, frame.key!) : undefined,
         );
       } else if (this.text[this.index] === ',') {
         this.ascii(',');
@@ -297,6 +303,17 @@ function escapePathSegment(segment: string | number): string | number {
   return segment.includes('~') || segment.includes('/')
     ? segment.replaceAll('~', '~0').replaceAll('/', '~1')
     : segment;
+}
+
+function renderPath(path: SourcePath): JsonPointer {
+  const segments: (string | number)[] = [];
+  for (
+    let current: SourcePath | undefined = path;
+    current;
+    current = current.parent
+  )
+    segments.push(current.segment);
+  return `/${segments.toReversed().map(escapePathSegment).join('/')}` as JsonPointer;
 }
 
 export function findDuplicateJSONKeys(

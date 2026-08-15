@@ -117,6 +117,19 @@ test('pretty reporter renders coordinate precision context from the rule message
   );
 });
 
+test('pretty reporter escapes hostile diagnostic paths', async () => {
+  const file = await lintGeoJSONText(
+    String.raw`{"type":"Feature","properties":{"a\"b":1,"a\"b":2,"line\nbreak":1,"line\nbreak":2,"\u001b":1,"\u001b":2},"geometry":null}`,
+    { filename: 'hostile.geojson', config: {} },
+  );
+  const output = formatPretty(createLintResult([file], 0));
+  assert.match(output, /\/properties\/a\\"b/);
+  assert.match(output, /\/properties\/line\\nbreak/);
+  assert.match(output, /\/properties\/\\u001b/);
+  assert.equal(output.includes('\u001b'), false);
+  assert.equal(output.split('\n').length, 10);
+});
+
 test('JSON reporter preserves hostile own keys without mutating prototypes', () => {
   const nested = Object.create(null) as Record<string, unknown>;
   nested['constructor'] = 'nested constructor';
