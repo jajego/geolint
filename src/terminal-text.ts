@@ -10,6 +10,8 @@ const namedEscapes: Readonly<Record<string, string>> = {
   '\t': '\\t',
 };
 
+const maximumDebugCauseDepth = 32;
+
 function unicodeEscape(character: string): string {
   return `\\u${character.codePointAt(0)!.toString(16).padStart(4, '0')}`;
 }
@@ -44,23 +46,44 @@ export function formatQuotedValue(value: string): string {
   return formatTerminalText(JSON.stringify(value));
 }
 
-/** Preserves runtime-owned stack frames while sanitizing error-controlled text. */
-export function formatDebugStack(error: Error): string | undefined {
+function debugStackLines(error: Error): string[] {
   const stack = error.stack;
-  const header = `${error.name}: ${error.message}`;
-  if (!stack?.startsWith(header)) return undefined;
+  const header = Error.prototype.toString.call(error);
+  const lines = [formatTerminalText(header)];
+  if (header.length === 0 || !stack?.startsWith(header)) return lines;
 
-  const ownStack = stack
+  const frames = stack
     .slice(header.length)
     .replace(/^\r?\n/, '')
     .split(/\r?\nCaused by: /, 1)[0]!;
-  const lines = [formatTerminalText(header)];
-  if (ownStack.length > 0)
-    lines.push(...ownStack.split(/\r?\n/).map(formatTerminalText));
+  if (frames.length === 0) return lines;
 
-  if (error.cause instanceof Error) {
-    const cause = formatDebugStack(error.cause);
-    if (cause) lines.push('Caused by:', cause);
+  const frameLines = frames.split(/\r?\n/);
+  if (!frameLines.every((line) => line.length === 0 || /^\s+at\s/.test(line)))
+    return lines;
+  lines.push(...frameLines.map(formatTerminalText));
+  return lines;
+}
+
+/** Preserves validated runtime stack frames while sanitizing error-controlled text. */
+export function formatDebugStack(error: Error): string {
+  const seen = new Set<Error>();
+  const lines: string[] = [];
+  let current: Error | undefined = error;
+  for (let depth = 0; current; depth += 1) {
+    if (seen.has(current)) {
+      lines.push('Caused by: [circular cause]');
+      break;
+    }
+    if (depth === maximumDebugCauseDepth) {
+      lines.push('Caused by: [cause chain truncated]');
+      break;
+    }
+    seen.add(current);
+    const rendered = debugStackLines(current);
+    if (depth === 0) lines.push(...rendered);
+    else lines.push(`Caused by: ${rendered[0]!}`, ...rendered.slice(1));
+    current = current.cause instanceof Error ? current.cause : undefined;
   }
   return lines.join('\n');
 }

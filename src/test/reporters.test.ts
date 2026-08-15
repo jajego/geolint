@@ -223,6 +223,78 @@ test('debug stacks preserve runtime frames without trusting error message newlin
   assert.equal(rendered.split('\n').length, 2);
 });
 
+test('debug stacks use standard Error headers and fail safely for malformed stacks', () => {
+  const emptyMessage = new Error('');
+  emptyMessage.stack = 'Error\n    at empty (test.js:1:1)';
+  assert.equal(
+    formatDebugStack(emptyMessage),
+    'Error\n    at empty (test.js:1:1)',
+  );
+
+  const emptyName = new Error('boom');
+  emptyName.name = '';
+  emptyName.stack = 'boom\n    at nameless (test.js:2:1)';
+  assert.equal(
+    formatDebugStack(emptyName),
+    'boom\n    at nameless (test.js:2:1)',
+  );
+
+  const emptyHeader = new Error('');
+  emptyHeader.name = '';
+  emptyHeader.stack = '\n    at untrusted (test.js:3:1)';
+  assert.equal(formatDebugStack(emptyHeader), '');
+
+  const hostileName = new Error('boom');
+  hostileName.name = 'Bad\nName\u001b\u202e';
+  hostileName.stack = `${Error.prototype.toString.call(hostileName)}\n    at safe (test.js:4:1)`;
+  assert.equal(
+    formatDebugStack(hostileName),
+    'Bad\\nName\\u001b\\u202e: boom\n    at safe (test.js:4:1)',
+  );
+
+  const malformed = new Error('boom');
+  malformed.stack = 'untrusted\n    at fake (test.js:5:1)';
+  assert.equal(formatDebugStack(malformed), 'Error: boom');
+  Object.defineProperty(malformed, 'stack', { value: undefined });
+  assert.equal(formatDebugStack(malformed), 'Error: boom');
+});
+
+test('debug stacks render bounded, cycle-safe Error causes', () => {
+  const inner = new Error('inner');
+  const middle = new Error('middle', { cause: inner });
+  const outer = new Error('outer', { cause: middle });
+  for (const [error, frame] of [
+    [outer, 'outer'],
+    [middle, 'middle'],
+    [inner, 'inner'],
+  ] as const)
+    error.stack = `${Error.prototype.toString.call(error)}\n    at ${frame} (test.js:1:1)`;
+  assert.equal(
+    formatDebugStack(outer),
+    'Error: outer\n    at outer (test.js:1:1)\nCaused by: Error: middle\n    at middle (test.js:1:1)\nCaused by: Error: inner\n    at inner (test.js:1:1)',
+  );
+
+  inner.cause = outer;
+  assert.match(formatDebugStack(outer), /Caused by: \[circular cause\]$/);
+
+  const hostileCause = new Error('inner\nFAKE\t\u001b\u202e');
+  hostileCause.stack = `${Error.prototype.toString.call(hostileCause)}\n    at hostile (test.js:2:1)`;
+  const withHostileCause = new Error('outer', { cause: hostileCause });
+  withHostileCause.stack = 'Error: outer\n    at outer (test.js:2:1)';
+  assert.equal(
+    formatDebugStack(withHostileCause),
+    'Error: outer\n    at outer (test.js:2:1)\nCaused by: Error: inner\\nFAKE\\t\\u001b\\u202e\n    at hostile (test.js:2:1)',
+  );
+
+  let longChain = new Error('0');
+  for (let index = 1; index <= 32; index += 1)
+    longChain = new Error(String(index), { cause: longChain });
+  assert.match(
+    formatDebugStack(longChain),
+    /Caused by: \[cause chain truncated\]$/,
+  );
+});
+
 test('pretty reporter keeps hostile plugin codes semantic but terminal-safe', async () => {
   const namespace = 'evil\n\u001b[31m\u202e';
   const localName = 'finding\t\u2066';
