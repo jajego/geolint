@@ -64,45 +64,47 @@ Measurements below were collected on Node v26.5.1, Windows x64, an Intel i9-9900
 
 | Case                                          |     Median |
 | --------------------------------------------- | ---------: |
-| recommended 100k points                       |    11.7 ms |
-| recommended 1m points                         |   187.2 ms |
-| source precision 100k                         |   110.7 ms |
-| source precision 1m                           | 1,117.3 ms |
-| Feature-byte budget, huge 100k-vertex Feature |   103.1 ms |
-| combined source policy, 10k Features          |    75.1 ms |
-| many tiny Features, 100k                      |   152.7 ms |
-| wide properties, 10k keys                     |     8.8 ms |
-| sparse properties, 10k Features               |    15.1 ms |
-| mixed property types, 10k Features            |    12.6 ms |
-| hostile losing duplicate, indexed detail      |    21.2 ms |
-| 100k coordinate failures                      |    18.1 ms |
-| CLI small lint cold start                     |   141.4 ms |
-| regression batch, 10 medium files             |    28.9 ms |
-| regression batch, 100 small files             |    68.7 ms |
+| recommended 100k points                       |    21.8 ms |
+| recommended 1m points                         |   292.6 ms |
+| source precision 100k                         |   145.8 ms |
+| source precision 1m                           | 1,408.2 ms |
+| Feature-byte budget, huge 100k-vertex Feature |   146.4 ms |
+| combined source policy, 10k Features          |   115.2 ms |
+| many tiny Features, 100k                      |   279.8 ms |
+| wide properties, 10k keys                     |    12.2 ms |
+| sparse properties, 10k Features               |    28.3 ms |
+| mixed property types, 10k Features            |    24.6 ms |
+| hostile losing duplicate, indexed detail      |    41.8 ms |
+| 100k coordinate failures                      |    27.1 ms |
+| CLI small lint cold start                     |   163.7 ms |
+| regression batch, 10 medium files             |    38.3 ms |
+| regression batch, 100 small files             |    75.6 ms |
 
-Buffered versus indexed semantic-only medians were 2.3/9.8 ms at 10k, 11.3/76.7 ms at 100k, and 181.1/754.1 ms at 1m. There is no measured crossover. The automatic strategy remains: buffered `JSON.parse` for semantic-only work and indexed execution only when exact source capabilities require it.
+Buffered versus indexed semantic-only medians were 3.4/16.6 ms at 10k, 23.4/111.8 ms at 100k, and 281.8/1,085.8 ms at 1m. There is no measured crossover. The automatic strategy remains: buffered `JSON.parse` for semantic-only work and indexed execution only when exact source capabilities require it.
 
-At 100k points, buffered attribution was 6.0 ms in `JSON.parse` and 10.5 ms in semantic scanning. Indexed attribution was 8.8 ms syntax validation, 8.8 ms initial index replay, and 82.0 ms semantic/lazy replay. Source precision performs required numeric-token decoding and decimal analysis, so its 110.7 ms versus recommended's 11.7 ms is not described as parser-only overhead.
+At 100k points, buffered detail measured 24.6 ms total: 5.9 ms in `JSON.parse`, 8.5 ms in the duplicate-key source scan (`duplicateKeyScanMs`), and 10.3 ms in semantic scanning. The object-heavy 100k-Feature detail case measured 228.3 ms total: 62.6 ms parsing, 112.3 ms duplicate scanning, and 52.6 ms semantic scanning. Indexed attribution at 100k points was 25.6 ms syntax validation, 15.9 ms initial index replay, and 87.7 ms semantic/lazy replay. Source precision performs required numeric-token decoding and decimal analysis, so its 145.8 ms versus recommended's 21.8 ms is not described as parser-only overhead.
 
-The losing duplicate case replayed and syntax-validated 928,971 source bytes but visited exactly one winning Position. The winning duplicate visited 100,000 Positions and took 99.0 ms versus 21.2 ms for the losing case. Both used one coordinate traversal and materialized no coordinate paths.
+The losing duplicate case replayed and syntax-validated 928,971 source bytes but visited exactly one winning Position. The winning duplicate visited 100,000 Positions and took 130.2 ms versus 41.8 ms for the losing case. Both used one coordinate traversal and materialized no coordinate paths.
 
-Fixed-seed randomized member order measured 18.0 ms versus 15.0 ms canonical. Pretty source was 3,328,961 bytes and 148.2 ms versus minified's 928,949 bytes and 121.3 ms; byte throughput was higher for pretty input because whitespace is cheap.
+Fixed-seed randomized member order measured 29.0 ms versus 26.7 ms canonical. Pretty source was 3,328,961 bytes and 178.9 ms versus minified's 928,949 bytes and 151.7 ms; byte throughput was higher for pretty input because whitespace is cheap.
 
-Many tiny Features were roughly 10.6 times slower than one huge Feature at the same 100k coordinate volume, reflecting Feature lifecycle, ID/property, summary, and path work. GeometryCollection-heavy 10k-position input measured 5.7 ms. Wide, sparse, and mixed-property workloads measured 8.8, 15.1, and 12.6 ms respectively.
+Many tiny Features were roughly 12.1 times slower than one huge Feature at the same 100k coordinate volume, reflecting Feature lifecycle, ID/property, summary, and path work. GeometryCollection-heavy 10k-position input measured 8.5 ms. Wide, sparse, and mixed-property workloads measured 12.2, 28.3, and 24.6 ms respectively.
 
 Diagnostic floods remained bounded: 100k coordinate failures retained 2 diagnostics and suppressed 99,998; 10k missing IDs retained 2 and suppressed 9,998; 9,999 duplicate-ID findings retained 2; and 10k Feature-budget findings retained 2.
 
-Sequential regression throughput was 345.6 files/s for 10 medium files and 1,455.0 files/s for 100 small files. These are the single-threaded reference measurements.
+Sequential regression throughput was 261.0 files/s for 10 medium files and 1,323.5 files/s for 100 small files. These are the single-threaded reference measurements.
 
 Peak RSS measured 55.2 MiB at 10k buffered points, 73.9 MiB at 100k, and 257.0 MiB at 1m. Indexed semantic-only 1m peaked at 162.3 MiB and indexed source-precision at 163.5 MiB, but both were much slower. A huge 100k-vertex Feature peaked at 80.6 MiB, 100k tiny Features at 185.0 MiB, and the indexed losing duplicate at 66.3 MiB. These measurements show input- and policy-dependent growth, not an asymptotic guarantee.
 
 ## Profiling and optimization
 
-CPU profiles were collected for recommended and source-aware 1m points, many tiny Features, wide/sparse properties, diagnostic floods, and the losing duplicate. Ordinary lint was dominated by native `JSON.parse`, garbage collection, and coordinate scanning. Source-aware lint was dominated by indexed number decoding, coordinate value materialization, and required decimal analysis. Wide/sparse cases concentrated in property scanning/stat completion; bounded diagnostic retention did not dominate flood workloads. The losing duplicate spent time in syntax/index token handling, not semantic traversal.
+CPU profiles were collected for recommended and source-aware 1m points, many tiny Features, wide/sparse properties, diagnostic floods, and the losing duplicate. Ordinary lint was dominated by native `JSON.parse`, duplicate-key source scanning, garbage collection, and coordinate scanning. Source-aware lint was dominated by indexed number decoding, coordinate value materialization, and required decimal analysis. Wide/sparse cases concentrated in property scanning/stat completion; bounded diagnostic retention did not dominate flood workloads. The losing duplicate spent time in syntax/index token handling, not semantic traversal.
 
-The many-Feature profile identified repeated JSON Pointer escaping for numeric Feature indices. A single retained production optimization returns numeric segments directly and skips replacements for strings without `~` or `/`. Three focused post-change medians were 147.4, 156.5, and 149.3 ms versus pre-change runs around 173–177 ms, a repeatable 12–16% improvement. The full artifact measured 177.3 to 152.7 ms (-13.9%). Peak RSS was unchanged (184.6 versus 184.5 MiB). A one-artifact LineString warning was investigated with five independent medians of 11.45–11.76 ms, matching the 11.6 ms baseline; it was timing noise, not a repeatable regression.
+The many-Feature profile identified repeated JSON Pointer escaping for numeric Feature indices. The retained optimization returns numeric segments directly and skips replacements for strings without `~` or `/`.
 
-No indexed-parser, scanner, rule-dispatch, diagnostic, or planner optimization was retained. Profiles showed their costs correspond to required work, and no additional small change met the evidence threshold.
+The buffered duplicate-source profile identified redundant grammar validation, path allocation, UTF-8 accounting, and per-object allocation after native parsing. The trusted-valid scanner reduced focused duplicate-scan medians from 31.3 to 9.4 ms for 100k coordinates and from 246.7 to 120.6 ms for 100k tiny Features; focused total buffered medians fell from 41.2 to 27.4 ms and from 343.8 to 223.5 ms respectively.
+
+No indexed-parser, semantic-scanner, rule-dispatch, diagnostic, or planner optimization was retained. Profiles showed their costs correspond to required work, and no additional small change met the evidence threshold.
 
 ## Caveats and policy
 
