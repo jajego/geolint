@@ -6,6 +6,7 @@ import { lintGeoJSON, lintGeoJSONText } from '../engine/lint-input.js';
 import { formatJson, jsonProjection } from '../reporters/json.js';
 import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
+import { formatQuotedValue, formatTerminalText } from '../terminal-text.js';
 import type { SnapshotProposal } from '../regression/snapshot.js';
 import type { BaselineFileEntry } from '../regression/schema.js';
 import { geolintVersion } from '../version.js';
@@ -123,11 +124,96 @@ test('pretty reporter escapes hostile diagnostic paths', async () => {
     { filename: 'hostile.geojson', config: {} },
   );
   const output = formatPretty(createLintResult([file], 0));
-  assert.match(output, /\/properties\/a\\"b/);
+  assert.match(output, /\/properties\/a"b/);
   assert.match(output, /\/properties\/line\\nbreak/);
   assert.match(output, /\/properties\/\\u001b/);
   assert.equal(output.includes('\u001b'), false);
   assert.equal(output.split('\n').length, 10);
+});
+
+test('property diagnostics quote hostile names while JSON data stays semantic', async () => {
+  const property = 'hello\nworld\t\u001b[31m東京🌋';
+  const file = await lintGeoJSON(
+    {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { [property]: 'first' },
+          geometry: null,
+        },
+        { type: 'Feature', properties: { [property]: 2 }, geometry: null },
+      ],
+    },
+    {
+      filename: 'properties.geojson',
+      config: { rules: { 'consistent-property-types': 'error' } },
+    },
+  );
+  const pretty = formatPretty(createLintResult([file], 0));
+  const json = JSON.parse(formatJson(createLintResult([file], 0))) as {
+    files: { diagnostics: { data: { property: string } }[] }[];
+  };
+
+  assert.match(
+    pretty,
+    /Property "hello\\nworld\\t\\u001b\[31m東京🌋" uses inconsistent types\./,
+  );
+  assert.equal(pretty.includes('\u001b'), false);
+  assert.equal(json.files[0]!.diagnostics[0]!.data.property, property);
+});
+
+test('terminal text keeps ordinary Unicode readable and makes controls visible', () => {
+  const value = 'a"b\\c\nhello\tworld\r\u001b[31m\u2028\u2029東京🌋';
+  const display = formatTerminalText(value);
+  const quoted = formatQuotedValue(value);
+
+  assert.equal(display.includes('東京🌋'), true);
+  assert.equal(quoted.includes('東京🌋'), true);
+  for (const control of ['\n', '\r', '\t', '\u001b', '\u2028', '\u2029']) {
+    assert.equal(display.includes(control), false);
+    assert.equal(quoted.includes(control), false);
+  }
+  assert.match(display, /a"b\\c\\nhello\\tworld\\r\\u001b\[31m\\u2028\\u2029/);
+  assert.match(
+    quoted,
+    /^"a\\"b\\\\c\\nhello\\tworld\\r\\u001b\[31m\\u2028\\u2029東京🌋"$/,
+  );
+});
+
+test('pretty reporter safely renders hostile paths, messages, and feature IDs', async () => {
+  const file = await lintGeoJSON(
+    {
+      type: 'Feature',
+      id: 'id\n\u001b[31m',
+      properties: {},
+      geometry: null,
+    },
+    { filename: 'foo/bar.geojson' },
+  );
+  const diagnostic = {
+    ...file.diagnostics[0]!,
+    featureId: 'id\n\u001b[31m',
+    message: 'Plugin finding\n\u001b[31m with 東京🌋.',
+  };
+  const output = formatPretty(
+    createLintResult(
+      [
+        {
+          ...file,
+          filePath: 'C:\\foo\\bar\n\u001b.geojson',
+          diagnostics: [diagnostic],
+        },
+      ],
+      0,
+    ),
+  );
+
+  assert.match(output, /C:\\foo\\bar\\n\\u001b\.geojson/);
+  assert.match(output, /id "id\\n\\u001b\[31m"/);
+  assert.match(output, /Plugin finding\\n\\u001b\[31m with 東京🌋\./);
+  assert.equal(output.includes('\u001b'), false);
+  assert.equal(output.split('\n').length, 8);
 });
 
 test('JSON reporter preserves hostile own keys without mutating prototypes', () => {
@@ -222,6 +308,22 @@ test('pretty snapshot reports stable useful diffs without unchanged noise', () =
       ],
     }),
   );
+});
+
+test('pretty snapshot safely renders hostile filenames without changing normal paths', () => {
+  const proposal: SnapshotProposal = {
+    mode: 'full',
+    baselinePath: 'baseline.json',
+    added: [{ filePath: 'foo/bar.geojson', after: entry() }],
+    updated: [],
+    removed: [{ filePath: 'C:\\foo\\bar\n\u001b.geojson', before: entry() }],
+    unchanged: [],
+  };
+  const output = formatSnapshot(proposal);
+
+  assert.match(output, /^GeoLint baseline update\n\nfoo\/bar\.geojson/m);
+  assert.match(output, /C:\\foo\\bar\\n\\u001b\.geojson/);
+  assert.equal(output.includes('\u001b'), false);
 });
 
 test('JSON reporter retains defensive rejection of invalid runtime values', () => {

@@ -166,6 +166,12 @@ value authority. Indexed lint uses the same cursor once for syntax validation,
 duplicates, and generic spans, then adds winning-member replay and GeoJSON-aware
 source facts. Invalid JSON emits only `parse/invalid-json`.
 
+## Terminal rendering boundary
+
+Human-facing reporters escape source- and user-controlled terminal control
+characters at the presentation boundary. Built-in prose uses JSON-style quoted
+semantic values; structured JSON reporters preserve the original semantic data.
+
 ## Phase 7: equivalence conformance decisions
 
 The Semantic Conformance Suite uses one test-only differential harness: `JSON.parse` plus

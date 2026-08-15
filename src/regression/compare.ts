@@ -1,6 +1,7 @@
 import { formatByteSize, parseByteSize } from '../engine/byte-size.js';
 import type { DiagnosticCollector } from '../engine/diagnostics.js';
 import { GeoLintCapabilityError } from '../engine/errors.js';
+import { formatQuotedValue } from '../terminal-text.js';
 import { skipPolicyForIncompleteFacts } from '../engine/requirements.js';
 import type { RegressionConfig, RegressionSeverity } from '../types/config.js';
 import type {
@@ -234,7 +235,7 @@ function addPropertyPolicies(
             direction
           ) {
             report(diagnostics, code, configured, () => ({
-              message: `Property "${property}" types ${direction}: ${formatPropertyTypes(baselineTypes)} → ${formatPropertyTypes(currentTypes)}.`,
+              message: `Property ${formatQuotedValue(property)} types ${direction}: ${formatPropertyTypes(baselineTypes)} → ${formatPropertyTypes(currentTypes)}.`,
               data: { property, baselineTypes, currentTypes },
             }));
           }
@@ -261,7 +262,7 @@ function addPropertyPolicies(
             : [...baselineKeys].filter((key) => !currentKeys.has(key));
         for (const property of keys.sort()) {
           report(diagnostics, code, configured, () => ({
-            message: `Property "${property}" was ${direction}.`,
+            message: `Property ${formatQuotedValue(property)} was ${direction}.`,
             data: { property },
           }));
         }

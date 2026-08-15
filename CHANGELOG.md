@@ -8,6 +8,10 @@ GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stab
 
 - Report duplicate JSON object keys from text and file input with the later key's JSON Pointer and UTF-8 byte offset.
 
+### Fixed
+
+- Escape control characters in human-readable diagnostic, path, filename, and snapshot output.
+
 ## 0.1.1 - 2026-08-10
 
 ### Changed

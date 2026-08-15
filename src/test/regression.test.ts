@@ -107,6 +107,23 @@ function evaluate(
   return { diagnostics, skipped };
 }
 
+test('regression property messages quote hostile property names without changing data', () => {
+  const propertyName = 'hello\nworld\t\u001b[31m東京🌋';
+  const result = evaluate(
+    { checks: { properties: { added: 'error' } } },
+    current({ propertyStats: new Map([[propertyName, property(['string'])]]) }),
+  );
+  const diagnostic = result.diagnostics.diagnostics[0]!;
+
+  assert.equal(
+    diagnostic.message,
+    'Property "hello\\nworld\\t\\u001b[31m東京🌋" was added.',
+  );
+  assert.equal(diagnostic.message.includes('\n'), false);
+  assert.equal(diagnostic.message.includes('\u001b'), false);
+  assert.equal(diagnostic.data?.property, propertyName);
+});
+
 test('numeric regression thresholds use strict AND boundaries and baseline-zero semantics', () => {
   const vertices = (percentage?: number, minimumIncrease?: number) =>
     ({

@@ -3,6 +3,7 @@ import type {
   SnapshotEntryChange,
   SnapshotProposal,
 } from '../regression/snapshot.js';
+import { formatTerminalText } from '../terminal-text.js';
 
 function count(value: number): string {
   return value.toLocaleString('en-US');
@@ -32,7 +33,7 @@ function changed(
 function update(entry: SnapshotEntryChange): string[] {
   const before = entry.before!;
   const after = entry.after!;
-  const lines = [entry.filePath];
+  const lines = [formatTerminalText(entry.filePath)];
   changed(lines, 'bytes', before.bytes, after.bytes, bytes);
   changed(lines, 'featureCount', before.featureCount, after.featureCount);
   changed(lines, 'totalVertices', before.totalVertices, after.totalVertices);
@@ -67,10 +68,15 @@ function update(entry: SnapshotEntryChange): string[] {
 export function formatSnapshot(proposal: SnapshotProposal): string {
   const lines = ['GeoLint baseline update', ''];
   for (const entry of proposal.added)
-    lines.push(entry.filePath, '  added', `  ${summary(entry.after!)}`, '');
+    lines.push(
+      formatTerminalText(entry.filePath),
+      '  added',
+      `  ${summary(entry.after!)}`,
+      '',
+    );
   for (const entry of proposal.updated) lines.push(...update(entry), '');
   for (const entry of proposal.removed)
-    lines.push(entry.filePath, '  removed', '');
+    lines.push(formatTerminalText(entry.filePath), '  removed', '');
   const changed =
     proposal.added.length + proposal.updated.length + proposal.removed.length;
   lines.push(`${changed} ${changed === 1 ? 'file' : 'files'} changed.`);

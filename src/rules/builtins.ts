@@ -1,5 +1,6 @@
 import { defineRule } from './define-rule.js';
 import { optionSchema } from './option-schema.js';
+import { formatQuotedValue } from '../terminal-text.js';
 import type { GeoJSONGeometryType, JsonValueType } from '../types/semantic.js';
 
 const geometryTypes = [
@@ -116,7 +117,7 @@ const consistentPropertyTypes = defineRule({
               : observedTypes.filter((type) => type !== 'null');
           if (compared.length > 1) {
             context.report({
-              message: `Property "${property}" uses inconsistent types.`,
+              message: `Property ${formatQuotedValue(property)} uses inconsistent types.`,
               data: { property, observedTypes },
             });
           }
@@ -161,7 +162,7 @@ const consistentPropertyPresence = defineRule({
               : stats.present / summary.featureCount;
           if (ratio < (options.minimumPresenceRatio ?? 1)) {
             context.report({
-              message: `Property "${property}" is not consistently present.`,
+              message: `Property ${formatQuotedValue(property)} is not consistently present.`,
               data: {
                 property,
                 present: stats.present,

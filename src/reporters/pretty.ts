@@ -4,6 +4,7 @@ import type {
   LintResult,
 } from '../types/semantic.js';
 import { formatByteSize } from '../engine/byte-size.js';
+import { formatQuotedValue, formatTerminalText } from '../terminal-text.js';
 
 export interface PrettyOptions {
   readonly color?: boolean;
@@ -15,14 +16,12 @@ function plural(value: number, singular: string, pluralForm = `${singular}s`) {
 
 function location(diagnostic: Diagnostic): string {
   if (diagnostic.featureId !== undefined) {
-    return `id ${JSON.stringify(diagnostic.featureId)}`;
+    return `id ${formatQuotedValue(diagnostic.featureId)}`;
   }
   if (diagnostic.featureIndex !== undefined) {
     return `feature[${diagnostic.featureIndex}]`;
   }
-  return diagnostic.path
-    ? JSON.stringify(diagnostic.path).slice(1, -1)
-    : 'artifact';
+  return diagnostic.path ? formatTerminalText(diagnostic.path) : 'artifact';
 }
 
 function fileLines(file: FileLintResult, color: boolean): string[] {
@@ -30,12 +29,12 @@ function fileLines(file: FileLintResult, color: boolean): string[] {
     color ? `\u001b[31m${value}\u001b[0m` : value;
   const yellow = (value: string) =>
     color ? `\u001b[33m${value}\u001b[0m` : value;
-  const lines = [file.filePath, ''];
+  const lines = [formatTerminalText(file.filePath), ''];
   for (const diagnostic of file.diagnostics) {
     const severity =
       diagnostic.severity === 'error' ? red('error') : yellow('warning');
     lines.push(
-      `  ${location(diagnostic)}  ${severity}  ${diagnostic.message}  ${diagnostic.code}`,
+      `  ${location(diagnostic)}  ${severity}  ${formatTerminalText(diagnostic.message)}  ${diagnostic.code}`,
     );
   }
   for (const item of file.suppressedDiagnostics) {

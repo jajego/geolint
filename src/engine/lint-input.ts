@@ -11,6 +11,7 @@ import {
   type DuplicateJsonKey,
   JsonSourceSyntaxError,
 } from '../parser/json-source.js';
+import { formatQuotedValue } from '../terminal-text.js';
 import { parseIndexedSource } from '../parser/indexed-source.js';
 import { DiagnosticCollector } from './diagnostics.js';
 import { compilePolicy, type CompiledPolicy } from './policy.js';
@@ -145,7 +146,7 @@ function reportDuplicateKeys(
     collector.report({
       code: 'json/duplicate-key',
       source: 'parser',
-      message: `Duplicate JSON object key ${JSON.stringify(key)}; later value overrides an earlier value.`,
+      message: `Duplicate JSON object key ${formatQuotedValue(key)}; later value overrides an earlier value.`,
       path,
       byteOffset,
       data: { key },

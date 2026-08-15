@@ -13,6 +13,7 @@ import { formatResolvedConfig } from '../reporters/config.js';
 import { formatJson } from '../reporters/json.js';
 import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
+import { formatTerminalText } from '../terminal-text.js';
 import { geolintVersion } from '../version.js';
 import { parseCliArguments, type CliArguments } from './args.js';
 import { resolveTargets } from '../engine/targets.js';
@@ -51,12 +52,14 @@ Exit codes: 0 clean, 1 lint findings/maximum warnings, 2 operational failure.
 
 function errorText(error: unknown, debug: boolean): string {
   if (error instanceof GeoLintError) {
-    const ordinary = `GeoLint error [${error.code}]:\n${error.message}\n`;
-    return debug && error.stack ? `${ordinary}${error.stack}\n` : ordinary;
+    const ordinary = `GeoLint error [${error.code}]:\n${formatTerminalText(error.message)}\n`;
+    return debug && error.stack
+      ? `${ordinary}${formatTerminalText(error.stack)}\n`
+      : ordinary;
   }
   const message = error instanceof Error ? error.message : String(error);
   const stack = debug && error instanceof Error ? error.stack : undefined;
-  return `GeoLint error [GEOLINT_CLI_ERROR]:\n${message}\n${stack ? `${stack}\n` : ''}`;
+  return `GeoLint error [GEOLINT_CLI_ERROR]:\n${formatTerminalText(message)}\n${stack ? `${formatTerminalText(stack)}\n` : ''}`;
 }
 
 function lintOutput(
@@ -108,7 +111,7 @@ async function printConfig(args: CliArguments): Promise<CliOutput> {
     exitCode: 0,
     stdout: formatResolvedConfig(config, file, baselinePath),
     stderr: args.debug
-      ? `GeoLint debug: project root: ${config.projectRoot}\n`
+      ? `GeoLint debug: project root: ${formatTerminalText(config.projectRoot)}\n`
       : '',
   };
 }
@@ -129,7 +132,7 @@ async function snapshot(args: CliArguments): Promise<CliOutput> {
         ? formatJson(result.proposal)
         : formatSnapshot(result.proposal),
     stderr: args.debug
-      ? `GeoLint debug: baseline: ${result.proposal.baselinePath}\n`
+      ? `GeoLint debug: baseline: ${formatTerminalText(result.proposal.baselinePath)}\n`
       : '',
   };
 }
@@ -153,14 +156,15 @@ async function lint(args: CliArguments): Promise<CliOutput> {
           ? 1
           : 0,
       stdout: lintOutput(result, args),
-      stderr: debug.length > 0 ? `${debug.join('\n')}\n` : '',
+      stderr:
+        debug.length > 0 ? `${debug.map(formatTerminalText).join('\n')}\n` : '',
     };
   } catch (error) {
     if (!(error instanceof GeoLintBatchError)) throw error;
     return {
       exitCode: 2,
       stdout: lintOutput(error.partialResult, args),
-      stderr: `${debug.length > 0 ? `${debug.join('\n')}\n` : ''}${error.errors.map((item) => errorText(item, args.debug)).join('')}`,
+      stderr: `${debug.length > 0 ? `${debug.map(formatTerminalText).join('\n')}\n` : ''}${error.errors.map((item) => errorText(item, args.debug)).join('')}`,
     };
   }
 }
