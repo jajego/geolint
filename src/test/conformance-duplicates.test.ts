@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { lintGeoJSONTextWithParser } from '../engine/lint-input.js';
+import {
+  lintGeoJSON,
+  lintGeoJSONTextWithParser,
+} from '../engine/lint-input.js';
 import {
   createExecutionRequirements,
   type SemanticListener,
@@ -132,6 +135,57 @@ const richConfig: GeoLintConfig = {
   },
   diagnostics: { maxPerCodePerFile: 2, maxPerFile: 20 },
 };
+
+test('source parsers report every decoded duplicate key in source order', async () => {
+  const accented = String.fromCharCode(0x00e9);
+  const source = `{"type":"Feature","properties":{"${accented}":0,"\\u00e9":1,"a/b":0,"a\\/b":1,"nested":{"a":0,"a":1},"__proto__":0,"__proto__":1},"geometry":null}`;
+  const offset = (member: string) =>
+    Buffer.byteLength(source.slice(0, source.indexOf(member)), 'utf8');
+  const expected = (
+    [
+      [accented, `/properties/${accented}`, '"\\u00e9":1'],
+      ['a/b', '/properties/a~1b', '"a\\/b":1'],
+      ['a', '/properties/nested/a', '"a":1'],
+      ['__proto__', '/properties/__proto__', '"__proto__":1'],
+    ] as const
+  ).map(([key, path, member]) => ({
+    code: 'json/duplicate-key',
+    source: 'parser',
+    severity: 'error',
+    message: `Duplicate JSON object key "${key}"; later value overrides an earlier value.`,
+    filePath: 'map.geojson',
+    path,
+    byteOffset: offset(member),
+    data: { key },
+  }));
+  const results = await Promise.all(
+    (['buffered', 'indexed', 'auto'] as const).map((parser) =>
+      lintGeoJSONTextWithParser(source, {
+        filename: 'map.geojson',
+        config: {},
+        parser,
+      }),
+    ),
+  );
+  for (const result of results) {
+    assert.deepEqual(result.diagnostics, expected);
+    assert.equal(result.errorCount, expected.length);
+  }
+  for (const result of results.slice(1)) {
+    const { durationMs: _duration, ...stable } = result;
+    const { durationMs: _firstDuration, ...firstStable } = results[0]!;
+    void _duration;
+    void _firstDuration;
+    assert.deepEqual(stable, firstStable);
+  }
+  const object = await lintGeoJSON(JSON.parse(source), {
+    filename: 'map.geojson',
+  });
+  assert.equal(
+    object.diagnostics.some(({ code }) => code === 'json/duplicate-key'),
+    false,
+  );
+});
 
 test('duplicate winner matrix matches JSON.parse across all semantic levels', async () => {
   for (let index = 0; index < duplicateCases.length; index += 1) {

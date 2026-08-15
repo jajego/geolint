@@ -158,6 +158,13 @@ its replayed bytes/object counts remain explicit. Very large negative
 coordinate exponents saturate reported effective decimals at
 `Number.MAX_SAFE_INTEGER`, while threshold comparison remains correct.
 
+Duplicate-key detection shares the indexed cursor's iterative JSON grammar and
+native string decoding. Buffered linting still uses `JSON.parse` as its value
+authority, then performs only this source walk to recover duplicate-member
+information that parsed JavaScript values cannot preserve. Invalid JSON emits
+only `parse/invalid-json`; indexed lint collects duplicates during its existing
+syntax-validation pass.
+
 ## Phase 7: equivalence conformance decisions
 
 The Semantic Conformance Suite uses one test-only differential harness: `JSON.parse` plus

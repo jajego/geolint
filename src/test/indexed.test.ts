@@ -552,7 +552,10 @@ test('unclassifiable Feature elements make requested Feature byte stats partial'
     '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":null}],"features":[]}',
     { config: { budgets: { feature: { bytes: '1B' } } } },
   );
-  assert.equal(losing.errorCount, 0);
+  assert.deepEqual(
+    losing.diagnostics.map(({ code }) => code),
+    ['json/duplicate-key'],
+  );
   assert.equal(losing.summary?.largestFeatureBytes, 0);
   assert.equal(losing.summary?.featureCount, 0);
 

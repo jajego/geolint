@@ -2,6 +2,10 @@
 
 Rule settings are `off`, `warn`, `error`, or `[severity, options]`. Built-in IDs are used without a namespace.
 
+## JSON source correctness
+
+Text and file input always report `json/duplicate-key` as an error when an object repeats a decoded JSON key. The diagnostic points to the later key because that value is the one JSON keeps. It is not configurable, and parsed-object input cannot detect it because JavaScript values do not retain losing members.
+
 | Rule                               | Purpose and options                                                                                                       | Preset            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------- |
 | `require-feature-id`               | Require every Feature to have an ID.                                                                                      | opt-in            |

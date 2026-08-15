@@ -169,7 +169,10 @@ test('duplicate control and arbitrary members expose only their final winning va
   }`;
   const result = await lintGeoJSONText(source, { config: {} });
 
-  assert.equal(result.errorCount, 0);
+  assert.equal(result.errorCount, 9);
+  assert.ok(
+    result.diagnostics.every(({ code }) => code === 'json/duplicate-key'),
+  );
   assert.equal(result.summary?.featureCount, 1);
   assert.equal(result.summary?.totalVertices, 1);
 

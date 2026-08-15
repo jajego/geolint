@@ -7,8 +7,10 @@ import { assertJsonValue } from '../input/json-value.js';
 import { decodeSource } from '../input/decode-source.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
 import {
+  findDuplicateJSONKeys,
   IndexedSyntaxError,
   parseIndexedSource,
+  type DuplicateJsonKey,
 } from '../parser/indexed-source.js';
 import { DiagnosticCollector } from './diagnostics.js';
 import { compilePolicy, type CompiledPolicy } from './policy.js';
@@ -135,6 +137,22 @@ function scanResult(
   return fileResult(collector, startedAt, summary, policy.finish(summary));
 }
 
+function reportDuplicateKeys(
+  collector: DiagnosticCollector,
+  duplicates: readonly DuplicateJsonKey[],
+): void {
+  for (const { key, path, byteOffset } of duplicates) {
+    collector.report({
+      code: 'json/duplicate-key',
+      source: 'parser',
+      message: `Duplicate JSON object key "${key}"; later value overrides an earlier value.`,
+      path,
+      byteOffset,
+      data: { key },
+    });
+  }
+}
+
 async function regressionBaseline(
   config: ResolvedConfig,
   filePath: string,
@@ -195,6 +213,7 @@ function lintResolvedText(
       });
       return fileResult(collector, startedAt);
     }
+    reportDuplicateKeys(collector, findDuplicateJSONKeys(text));
     return scanResult(
       parsed.value,
       collector,
@@ -206,6 +225,7 @@ function lintResolvedText(
   }
   try {
     const parsed = parseIndexedSource(text, requirements);
+    reportDuplicateKeys(collector, parsed.duplicateKeys);
     return scanResult(
       parsed.value,
       collector,

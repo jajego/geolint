@@ -1,5 +1,5 @@
 import type { ExecutionRequirements } from '../engine/requirements.js';
-import type { JsonObject, JsonValue } from '../types/semantic.js';
+import type { JsonObject, JsonPointer, JsonValue } from '../types/semantic.js';
 
 type JsonTokenKind =
   'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
@@ -15,6 +15,12 @@ interface IndexedSpan {
 export interface SourceSpan {
   readonly startByte: number;
   readonly endByteExclusive: number;
+}
+
+export interface DuplicateJsonKey {
+  readonly key: string;
+  readonly path: JsonPointer;
+  readonly byteOffset: number;
 }
 
 export interface IndexedInstrumentation {
@@ -194,7 +200,10 @@ class Cursor {
       : undefined;
   }
 
-  value(capture = true): IndexedSpan | undefined {
+  value(
+    capture = true,
+    duplicate?: (occurrence: DuplicateJsonKey) => void,
+  ): IndexedSpan | undefined {
     this.whitespace();
     const start = this.index;
     const startByte = this.byte;
@@ -216,10 +225,32 @@ class Cursor {
     const objectValue = 6;
     const objectAfter = 7;
     const kind = character === '[' ? 'array' : 'object';
-    const stack = [character === '[' ? arrayFirst : objectFirst];
+    const stack: {
+      state: number;
+      path: JsonPointer;
+      arrayIndex?: number;
+      key?: string;
+      keys?: Set<string>;
+    }[] = [
+      {
+        state: character === '[' ? arrayFirst : objectFirst,
+        path: '' as JsonPointer,
+        ...(duplicate && character === '[' ? { arrayIndex: 0 } : {}),
+        ...(duplicate && character === '{' ? { keys: new Set() } : {}),
+      },
+    ];
     this.ascii(character);
 
-    const consumeValue = (): void => {
+    const appendPath = (path: JsonPointer, segment: string | number) =>
+      `${path}/${
+        typeof segment === 'number'
+          ? segment
+          : segment.includes('~') || segment.includes('/')
+            ? segment.replaceAll('~', '~0').replaceAll('/', '~1')
+            : segment
+      }` as JsonPointer;
+
+    const consumeValue = (path: JsonPointer): void => {
       this.whitespace();
       const next = this.text[this.index];
       if (next === '"') this.string(false);
@@ -230,24 +261,34 @@ class Cursor {
       else if (next === 'n') this.literal('null', false);
       else if (next === '[' || next === '{') {
         this.ascii(next);
-        stack.push(next === '[' ? arrayFirst : objectFirst);
+        stack.push({
+          state: next === '[' ? arrayFirst : objectFirst,
+          path,
+          ...(duplicate && next === '[' ? { arrayIndex: 0 } : {}),
+          ...(duplicate && next === '{' ? { keys: new Set() } : {}),
+        });
       } else this.fail();
     };
 
     while (stack.length > 0) {
       const last = stack.length - 1;
-      const state = stack[last]!;
+      const frame = stack[last]!;
+      const state = frame.state;
       this.whitespace();
       if (state <= arrayAfter) {
         if (state === arrayFirst && this.text[this.index] === ']') {
           this.ascii(']');
           stack.pop();
         } else if (state === arrayFirst || state === arrayValue) {
-          stack[last] = arrayAfter;
-          consumeValue();
+          frame.state = arrayAfter;
+          if (duplicate) {
+            const index = frame.arrayIndex!;
+            frame.arrayIndex = index + 1;
+            consumeValue(appendPath(frame.path, index));
+          } else consumeValue(frame.path);
         } else if (this.text[this.index] === ',') {
           this.ascii(',');
-          stack[last] = arrayValue;
+          frame.state = arrayValue;
         } else if (this.text[this.index] === ']') {
           this.ascii(']');
           stack.pop();
@@ -257,17 +298,32 @@ class Cursor {
         stack.pop();
       } else if (state === objectFirst || state === objectKey) {
         if (this.text[this.index] !== '"') this.fail();
-        this.string(false);
-        stack[last] = objectColon;
+        if (duplicate) {
+          const keySpan = this.string()!;
+          const key = JSON.parse(
+            this.text.slice(keySpan.start, keySpan.end),
+          ) as string;
+          if (frame.keys!.has(key)) {
+            duplicate({
+              key,
+              path: appendPath(frame.path, key),
+              byteOffset: keySpan.startByte,
+            });
+          } else frame.keys!.add(key);
+          frame.key = key;
+        } else this.string(false);
+        frame.state = objectColon;
       } else if (state === objectColon) {
         this.ascii(':');
-        stack[last] = objectValue;
+        frame.state = objectValue;
       } else if (state === objectValue) {
-        stack[last] = objectAfter;
-        consumeValue();
+        frame.state = objectAfter;
+        consumeValue(
+          duplicate ? appendPath(frame.path, frame.key!) : frame.path,
+        );
       } else if (this.text[this.index] === ',') {
         this.ascii(',');
-        stack[last] = objectKey;
+        frame.state = objectKey;
       } else if (this.text[this.index] === '}') {
         this.ascii('}');
         stack.pop();
@@ -511,10 +567,17 @@ export function parseIndexedSource(
   text: string,
   requirements: ExecutionRequirements,
   instrumentation?: IndexedInstrumentation,
-): { readonly value: JsonValue; readonly sourceBytes: number } {
+): {
+  readonly value: JsonValue;
+  readonly sourceBytes: number;
+  readonly duplicateKeys: readonly DuplicateJsonKey[];
+} {
   const startedAt = performance.now();
   const cursor = new Cursor(text);
-  const root = cursor.value()!;
+  const duplicateKeys: DuplicateJsonKey[] = [];
+  const root = cursor.value(true, (occurrence) =>
+    duplicateKeys.push(occurrence),
+  )!;
   cursor.whitespace();
   if (cursor.index !== text.length) cursor.fail();
   const validatedAt = performance.now();
@@ -531,7 +594,19 @@ export function parseIndexedSource(
   if (instrumentation) {
     instrumentation.initialIndexReplayMs = performance.now() - validatedAt;
   }
-  return { value, sourceBytes: cursor.byte };
+  return { value, sourceBytes: cursor.byte, duplicateKeys };
+}
+
+/** Finds duplicate object keys without retaining an indexed source tree. */
+export function findDuplicateJSONKeys(
+  text: string,
+): readonly DuplicateJsonKey[] {
+  const cursor = new Cursor(text);
+  const duplicateKeys: DuplicateJsonKey[] = [];
+  cursor.value(false, (occurrence) => duplicateKeys.push(occurrence));
+  cursor.whitespace();
+  if (cursor.index !== text.length) cursor.fail();
+  return duplicateKeys;
 }
 
 export function isIndexedSequence(

@@ -2,6 +2,12 @@
 
 GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stable release, `0.x` changes may refine public contracts and are documented here.
 
+## Unreleased
+
+### Added
+
+- Report duplicate JSON object keys from text and file input with the later key's JSON Pointer and UTF-8 byte offset.
+
 ## 0.1.1 - 2026-08-10
 
 ### Changed

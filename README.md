@@ -47,7 +47,7 @@ npx geolint "public/**/*.geojson"
 
 ### Quality
 
-Quality rules catch production problems such as missing or duplicate Feature IDs, property/type drift, unexpected geometry patterns, invalid coordinate ranges, and inconsistent coordinate dimensions. Source-aware rules can also enforce coordinate precision.
+Quality rules catch production problems such as missing or duplicate Feature IDs, property/type drift, unexpected geometry patterns, invalid coordinate ranges, and inconsistent coordinate dimensions. Source input also reports duplicate JSON object keys before their overwritten values disappear. Source-aware rules can enforce coordinate precision.
 
 The recommended preset provides useful consistency checks out of the box. Add a config when your project needs a more specific policy:
 

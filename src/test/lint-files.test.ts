@@ -103,10 +103,26 @@ test('stdin bytes use normal text execution and invalid UTF-8 is a finding', asy
     targets: ['-'],
     noConfig: true,
     stdinFilename: 'public/generated.geojson',
-    stdinBytes: Buffer.from('{"type":"Point","coordinates":[0,0]}'),
+    stdinBytes: Buffer.from(
+      '{"type":"Feature","properties":{"name":"first","name":"second"},"geometry":null}',
+    ),
   });
   assert.equal(valid.files[0]?.filePath, 'public/generated.geojson');
   assert.ok(valid.files[0]?.summary);
+  assert.deepEqual(valid.files[0]?.diagnostics[0], {
+    code: 'json/duplicate-key',
+    source: 'parser',
+    severity: 'error',
+    message:
+      'Duplicate JSON object key "name"; later value overrides an earlier value.',
+    filePath: 'public/generated.geojson',
+    path: '/properties/name',
+    byteOffset: Buffer.byteLength(
+      '{"type":"Feature","properties":{"name":"first",',
+      'utf8',
+    ),
+    data: { key: 'name' },
+  });
 
   const invalid = await executeLintFiles({
     targets: ['-'],

@@ -302,6 +302,26 @@ test('CLI stdin supports identity, malformed JSON, and invalid UTF-8', () => {
     'public/generated.geojson',
   );
 
+  const duplicate = runResult(['--no-config', '--format', 'json', '-'], {
+    input:
+      '{"type":"Feature","properties":{"name":"first","name":"second"},"geometry":null}',
+  });
+  assert.equal(duplicate.status, 1);
+  assert.deepEqual(JSON.parse(duplicate.stdout).files[0].diagnostics[0], {
+    code: 'json/duplicate-key',
+    source: 'parser',
+    severity: 'error',
+    message:
+      'Duplicate JSON object key "name"; later value overrides an earlier value.',
+    filePath: '<stdin>',
+    path: '/properties/name',
+    byteOffset: Buffer.byteLength(
+      '{"type":"Feature","properties":{"name":"first",',
+      'utf8',
+    ),
+    data: { key: 'name' },
+  });
+
   const malformed = runResult(['--no-config', '--format', 'json', '-'], {
     input: '{',
   });

@@ -88,6 +88,26 @@ export function ordinaryProjection(result: FileLintResult): unknown {
   };
 }
 
+function ordinarySemanticProjection(result: FileLintResult): unknown {
+  const duplicateCount =
+    result.diagnostics.filter(({ code }) => code === 'json/duplicate-key')
+      .length +
+    (result.suppressedDiagnostics.find(
+      ({ code, severity }) =>
+        code === 'json/duplicate-key' && severity === 'error',
+    )?.suppressedCount ?? 0);
+  return ordinaryProjection({
+    ...result,
+    diagnostics: result.diagnostics.filter(
+      ({ code }) => code !== 'json/duplicate-key',
+    ),
+    suppressedDiagnostics: result.suppressedDiagnostics.filter(
+      ({ code }) => code !== 'json/duplicate-key',
+    ),
+    errorCount: result.errorCount - duplicateCount,
+  });
+}
+
 function sourceProjection(result: FileLintResult): unknown {
   const { durationMs: _duration, ...stable } = result;
   void _duration;
@@ -166,12 +186,12 @@ export async function assertOrdinaryEquivalence(
   });
   const details = context(test, 'object/buffered/indexed');
   assert.deepEqual(
-    ordinaryProjection(buffered),
+    ordinarySemanticProjection(buffered),
     ordinaryProjection(object),
     details,
   );
   assert.deepEqual(
-    ordinaryProjection(indexed),
+    ordinarySemanticProjection(indexed),
     ordinaryProjection(object),
     details,
   );
@@ -226,8 +246,8 @@ export async function assertEquivalentSources(
     const observed = await lintGeoJSONTextWithParser(actual.source, options);
     const wanted = await lintGeoJSONTextWithParser(expected.source, options);
     assert.deepEqual(
-      ordinaryProjection(observed),
-      ordinaryProjection(wanted),
+      ordinarySemanticProjection(observed),
+      ordinarySemanticProjection(wanted),
       context(actual, `${parser}/canonical-winner`),
     );
   }
