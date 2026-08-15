@@ -13,7 +13,7 @@ import { formatResolvedConfig } from '../reporters/config.js';
 import { formatJson } from '../reporters/json.js';
 import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
-import { formatTerminalText } from '../terminal-text.js';
+import { formatDebugStack, formatTerminalText } from '../terminal-text.js';
 import { geolintVersion } from '../version.js';
 import { parseCliArguments, type CliArguments } from './args.js';
 import { resolveTargets } from '../engine/targets.js';
@@ -51,15 +51,14 @@ Exit codes: 0 clean, 1 lint findings/maximum warnings, 2 operational failure.
 `;
 
 function errorText(error: unknown, debug: boolean): string {
+  const stack =
+    debug && error instanceof Error ? formatDebugStack(error) : undefined;
   if (error instanceof GeoLintError) {
     const ordinary = `GeoLint error [${error.code}]:\n${formatTerminalText(error.message)}\n`;
-    return debug && error.stack
-      ? `${ordinary}${formatTerminalText(error.stack)}\n`
-      : ordinary;
+    return stack ? `${ordinary}${stack}\n` : ordinary;
   }
   const message = error instanceof Error ? error.message : String(error);
-  const stack = debug && error instanceof Error ? error.stack : undefined;
-  return `GeoLint error [GEOLINT_CLI_ERROR]:\n${formatTerminalText(message)}\n${stack ? `${formatTerminalText(stack)}\n` : ''}`;
+  return `GeoLint error [GEOLINT_CLI_ERROR]:\n${formatTerminalText(message)}\n${stack ? `${stack}\n` : ''}`;
 }
 
 function lintOutput(

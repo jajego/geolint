@@ -7,7 +7,11 @@ import { definePlugin, defineRule } from '../index.js';
 import { formatJson, jsonProjection } from '../reporters/json.js';
 import { formatPretty } from '../reporters/pretty.js';
 import { formatSnapshot } from '../reporters/snapshot.js';
-import { formatQuotedValue, formatTerminalText } from '../terminal-text.js';
+import {
+  formatDebugStack,
+  formatQuotedValue,
+  formatTerminalText,
+} from '../terminal-text.js';
 import type { SnapshotProposal } from '../regression/snapshot.js';
 import type { BaselineFileEntry } from '../regression/schema.js';
 import { geolintVersion } from '../version.js';
@@ -196,6 +200,27 @@ test('terminal text keeps ordinary Unicode readable and makes controls visible',
     quoted,
     /^"a\\"b\\\\c\\nhello\\tworld\\r\\u001b\[31m\\u2028\\u2029\\u061c\\u200f\\u202e\\u2066\\u2069東京🌋"$/,
   );
+});
+
+test('debug stacks preserve runtime frames without trusting error message newlines', () => {
+  const normal = new Error('boom');
+  normal.stack =
+    'Error: boom\r\n    at foo (test.js:1:1)\r\n    at bar (test.js:2:1)';
+  assert.equal(
+    formatDebugStack(normal),
+    'Error: boom\n    at foo (test.js:1:1)\n    at bar (test.js:2:1)',
+  );
+
+  const hostile = new Error('boom\nFAKE FRAME\t\u001b[31m\u202e');
+  hostile.stack = `Error: ${hostile.message}\n    at real (test.js:3:1)`;
+  const rendered = formatDebugStack(hostile)!;
+  assert.equal(
+    rendered,
+    'Error: boom\\nFAKE FRAME\\t\\u001b[31m\\u202e\n    at real (test.js:3:1)',
+  );
+  assert.equal(rendered.includes('\u001b'), false);
+  assert.equal(rendered.includes('\u202e'), false);
+  assert.equal(rendered.split('\n').length, 2);
 });
 
 test('pretty reporter keeps hostile plugin codes semantic but terminal-safe', async () => {

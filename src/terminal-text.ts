@@ -28,7 +28,7 @@ function isUnsafeTerminalCharacter(character: string): boolean {
   );
 }
 
-/** Keeps ordinary display text natural while making terminal controls visible. */
+/** Keeps ordinary display text natural while making it safe for one terminal line. */
 export function formatTerminalText(value: string): string {
   let formatted = '';
   for (const character of value) {
@@ -39,7 +39,28 @@ export function formatTerminalText(value: string): string {
   return formatted;
 }
 
-/** Formats an arbitrary semantic value safely for inclusion in prose. */
+/** Formats an arbitrary semantic string safely for inclusion in human-readable prose. */
 export function formatQuotedValue(value: string): string {
   return formatTerminalText(JSON.stringify(value));
+}
+
+/** Preserves runtime-owned stack frames while sanitizing error-controlled text. */
+export function formatDebugStack(error: Error): string | undefined {
+  const stack = error.stack;
+  const header = `${error.name}: ${error.message}`;
+  if (!stack?.startsWith(header)) return undefined;
+
+  const ownStack = stack
+    .slice(header.length)
+    .replace(/^\r?\n/, '')
+    .split(/\r?\nCaused by: /, 1)[0]!;
+  const lines = [formatTerminalText(header)];
+  if (ownStack.length > 0)
+    lines.push(...ownStack.split(/\r?\n/).map(formatTerminalText));
+
+  if (error.cause instanceof Error) {
+    const cause = formatDebugStack(error.cause);
+    if (cause) lines.push('Caused by:', cause);
+  }
+  return lines.join('\n');
 }

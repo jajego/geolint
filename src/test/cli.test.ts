@@ -51,6 +51,14 @@ test('CLI version derives from package metadata', async () => {
   });
 });
 
+test('CLI debug preserves physical stack frames', () => {
+  const result = runResult(['--debug', '--config', 'missing-geolint.json']);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /\n\s+at /);
+  assert.doesNotMatch(result.stderr, /\\n\s+at /);
+});
+
 test('snapshot command writes a baseline and prints its proposal', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geolint-cli-snapshot-'));
   try {
