@@ -25,7 +25,7 @@ Cold-start cases launch a fresh built CLI process for each of five samples. They
 
 Peak RSS cases each run in a dedicated child process and report the larger of Node's process RSS and `resourceUsage().maxRSS`. The measurement includes the source text and fixture representation resident in that process. It is not a constant-memory claim and is not directly comparable across operating systems.
 
-Throughput uses actual result Features and vertices. Indexed detail cases retain syntax-validation, initial-index-replay, semantic-replay, object/span, replayed-byte, traversal, Position-visit, and path-materialization instrumentation. Buffered detail separately measures `JSON.parse` and semantic scanning.
+Throughput uses actual result Features and vertices. Indexed detail cases retain syntax-validation, initial-index-replay, semantic-replay, object/span, replayed-byte, traversal, Position-visit, and path-materialization instrumentation. Coordinate-heavy and object-heavy buffered detail cases separately measure `JSON.parse`, duplicate-key source scanning, semantic scanning, and total buffered execution.
 
 ## Artifact schema
 

@@ -315,14 +315,3 @@ function renderPath(path: SourcePath): JsonPointer {
     segments.push(current.segment);
   return `/${segments.toReversed().map(escapePathSegment).join('/')}` as JsonPointer;
 }
-
-export function findDuplicateJSONKeys(
-  text: string,
-): readonly DuplicateJsonKey[] {
-  const cursor = new JsonSourceCursor(text);
-  const duplicateKeys: DuplicateJsonKey[] = [];
-  cursor.value(false, (occurrence) => duplicateKeys.push(occurrence));
-  cursor.whitespace();
-  if (cursor.index !== text.length) cursor.fail();
-  return duplicateKeys;
-}

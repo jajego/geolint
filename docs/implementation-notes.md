@@ -159,12 +159,12 @@ its replayed bytes/object counts remain explicit. Very large negative
 coordinate exponents saturate reported effective decimals at
 `Number.MAX_SAFE_INTEGER`, while threshold comparison remains correct.
 
-The neutral JSON source cursor owns strict lexical structure, decoded member
-names, iterative nesting, spans, and UTF-8 byte accounting. Buffered linting
-uses it only to recover duplicate-member facts, while `JSON.parse` remains the
-value authority. Indexed lint uses the same cursor once for syntax validation,
-duplicates, and generic spans, then adds winning-member replay and GeoJSON-aware
-source facts. Invalid JSON emits only `parse/invalid-json`.
+The neutral JSON source cursor owns strict lexical structure, iterative nesting,
+spans, and UTF-8 byte accounting for indexed lint. Buffered lint keeps
+`JSON.parse` as its value and syntax authority, then uses a trusted-valid lexical
+scan to recover decoded duplicate-member facts without revalidating scalar
+grammar or allocating paths for ordinary values. Invalid JSON emits only
+`parse/invalid-json`.
 
 ## Terminal rendering boundary
 

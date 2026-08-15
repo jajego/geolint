@@ -6,8 +6,8 @@ import { resolveRuntimeConfig } from '../config/runtime.js';
 import { assertJsonValue } from '../input/json-value.js';
 import { decodeSource } from '../input/decode-source.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
+import { scanDuplicateKeysFromValidJSON } from '../parser/duplicate-keys.js';
 import {
-  findDuplicateJSONKeys,
   type DuplicateJsonKey,
   JsonSourceSyntaxError,
 } from '../parser/json-source.js';
@@ -214,7 +214,7 @@ function lintResolvedText(
       });
       return fileResult(collector, startedAt);
     }
-    reportDuplicateKeys(collector, findDuplicateJSONKeys(text));
+    reportDuplicateKeys(collector, scanDuplicateKeysFromValidJSON(text));
     return scanResult(
       parsed.value,
       collector,

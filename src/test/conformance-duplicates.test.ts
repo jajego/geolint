@@ -213,6 +213,37 @@ test('duplicate-key messages safely render hostile decoded names', async () => {
   }
 });
 
+test('buffered duplicate scanning handles scalar roots and escaped key equivalence', async () => {
+  for (const source of ['0', 'true', 'null', '"value"', '[]', '{}']) {
+    const result = await lintGeoJSONTextWithParser(source, {
+      parser: 'buffered',
+      config: {},
+    });
+    assert.equal(
+      result.diagnostics.some(({ code }) => code === 'parse/invalid-json'),
+      false,
+    );
+  }
+
+  const source = String.raw`{"type":"Feature","properties":{"a\"b":0,"a\u0022b":1,"slash\\key":0,"slash\u005ckey":1},"geometry":null}`;
+  const buffered = await lintGeoJSONTextWithParser(source, {
+    parser: 'buffered',
+    config: {},
+  });
+  const indexed = await lintGeoJSONTextWithParser(source, {
+    parser: 'indexed',
+    config: {},
+  });
+  assert.deepEqual(buffered.diagnostics, indexed.diagnostics);
+  assert.deepEqual(
+    buffered.diagnostics.map(({ path, data }) => ({ path, data })),
+    [
+      { path: '/properties/a"b', data: { key: 'a"b' } },
+      { path: '/properties/slash\\key', data: { key: 'slash\\key' } },
+    ],
+  );
+});
+
 test('duplicate equality is exact and object-local', async () => {
   const composed = String.fromCharCode(0x00e9);
   const decomposed = `e${String.fromCharCode(0x0301)}`;

@@ -10,6 +10,7 @@ import { lintGeoJSONTextWithParser } from '../engine/lint-input.js';
 import { compilePolicy } from '../engine/policy.js';
 import { createExecutionRequirements } from '../engine/requirements.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
+import { scanDuplicateKeysFromValidJSON } from '../parser/duplicate-keys.js';
 import {
   parseIndexedSource,
   type IndexedInstrumentation,
@@ -204,50 +205,71 @@ function measureIndexedDetail(fixtureId: FixtureId): BenchmarkCaseResult {
   );
 }
 
-function measureBufferedDetail(): BenchmarkCaseResult {
-  const fixture = createFixture('points-100k');
+function measureBufferedDetail(fixtureId: FixtureId): BenchmarkCaseResult {
+  const fixture = createFixture(fixtureId);
   const sourceBytes = Buffer.byteLength(fixture.source);
-  const requirements = createExecutionRequirements({ facts: ['vertexCount'] });
+  const requirements = createExecutionRequirements({
+    facts: ['featureCount', 'vertexCount'],
+  });
   const execute = () => {
     const startedAt = performance.now();
     const parsed = parseBufferedJSON(fixture.source);
     const parsedAt = performance.now();
     if (!parsed.ok) throw new Error('Buffered benchmark fixture was invalid.');
+    const duplicates = scanDuplicateKeysFromValidJSON(fixture.source);
+    const duplicatesAt = performance.now();
     const summary = scanGeoJSON(parsed.value, {
       filePath: '<benchmark>',
       requirements,
     });
     const finishedAt = performance.now();
-    if (summary.totalVertices !== fixture.expectedVertices) {
+    if (
+      duplicates.length !== 0 ||
+      summary.featureCount !== fixture.expectedFeatures ||
+      summary.totalVertices !== fixture.expectedVertices
+    ) {
       throw new Error('Buffered benchmark invariant failed.');
     }
     return {
       elapsedMs: finishedAt - startedAt,
       parseMs: parsedAt - startedAt,
-      semanticMs: finishedAt - parsedAt,
+      duplicateMs: duplicatesAt - parsedAt,
+      semanticMs: finishedAt - duplicatesAt,
     };
   };
   execute();
   const samples: number[] = [];
   const parseSamples: number[] = [];
+  const duplicateSamples: number[] = [];
   const semanticSamples: number[] = [];
-  for (let iteration = 0; iteration < 5; iteration += 1) {
+  for (
+    let iteration = 0;
+    iteration < sampleCount(sourceBytes);
+    iteration += 1
+  ) {
     const measured = execute();
     samples.push(measured.elapsedMs);
     parseSamples.push(measured.parseMs);
+    duplicateSamples.push(measured.duplicateMs);
     semanticSamples.push(measured.semanticMs);
   }
   return result(
     {
-      id: 'buffered-detail/points-100k',
+      id: `buffered-detail/${fixture.id}`,
       group: 'instrumentation',
       fixture: fixture.id,
-      profile: 'buffered-detail',
+      profile: 'buffered-detail-v2',
       strategy: 'buffered',
       sourceBytes,
-      semanticCounts: { vertices: fixture.expectedVertices },
+      semanticCounts: {
+        ...(fixture.expectedFeatures > 0
+          ? { features: fixture.expectedFeatures }
+          : {}),
+        vertices: fixture.expectedVertices,
+      },
       instrumentation: {
         jsonParseMs: round(median(parseSamples)),
+        duplicateKeyScanMs: round(median(duplicateSamples)),
         semanticScanMs: round(median(semanticSamples)),
       },
     },
@@ -632,7 +654,8 @@ export async function runBenchmarks(
     measureIndexedDetail('duplicate-losing-100k'),
     measureIndexedDetail('duplicate-winning-100k'),
     measureIndexedDetail('points-100k'),
-    measureBufferedDetail(),
+    measureBufferedDetail('points-100k'),
+    measureBufferedDetail('tiny-features-100k'),
     measureMultiRuleTraversal(),
   );
   cases.push(
@@ -646,6 +669,10 @@ export async function runBenchmarks(
 }
 
 export async function runProfileCase(id: string): Promise<BenchmarkCaseResult> {
+  if (id === 'buffered-detail/points-100k')
+    return measureBufferedDetail('points-100k');
+  if (id === 'buffered-detail/tiny-features-100k')
+    return measureBufferedDetail('tiny-features-100k');
   if (id === 'indexed-detail/duplicate-losing-100k') {
     return measureIndexedDetail('duplicate-losing-100k');
   }
