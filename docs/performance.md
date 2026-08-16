@@ -57,7 +57,7 @@ The comparison command validates schema version 1 and the required artifact, env
 
 ## Fixtures and profiles
 
-The suite covers 10k/100k/1m points, LineString, Polygon, nested mixed GeometryCollections, one huge Feature, many tiny Features, wide/sparse/mixed properties, canonical/fixed-seed random member order, losing/winning huge duplicate coordinates, minified/pretty source, and high-cardinality failures.
+The suite covers 10k/100k/1m points, LineString, Polygon, nested mixed GeometryCollections, one huge Feature, many tiny Features, wide/sparse/mixed properties, canonical/fixed-seed random member order, losing/winning huge duplicate coordinates, minified/pretty source, and high-cardinality failures. Public parsed-object profiles run `lintGeoJSON()` against 100k/1m coordinates, 100k Features, and wide properties; fixture construction is outside the timed region so they guard arbitrary-JavaScript validation plus semantic linting.
 
 Named profiles are `structural`, `recommended`, `source-precision`, `source-feature-bytes`, `source-combined`, `regression`, `snapshot-facts`, and `high-cardinality-failure`. A three-plugin-coordinate-hook case measures dispatch while asserting one coordinate traversal and exactly three callbacks per Position.
 

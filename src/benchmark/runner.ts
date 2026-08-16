@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 import { DiagnosticCollector } from '../engine/diagnostics.js';
 import { lintFiles } from '../engine/lint-files.js';
-import { lintGeoJSONTextWithParser } from '../engine/lint-input.js';
+import {
+  lintGeoJSON,
+  lintGeoJSONTextWithParser,
+} from '../engine/lint-input.js';
 import { compilePolicy } from '../engine/policy.js';
 import { createExecutionRequirements } from '../engine/requirements.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
@@ -47,6 +50,13 @@ function result(
 function sampleCount(sourceBytes: number): number {
   return sourceBytes >= 5_000_000 ? 3 : 5;
 }
+
+const objectFixtures = [
+  'points-100k',
+  'points-1m',
+  'tiny-features-100k',
+  'wide-properties-10k',
+] as const satisfies readonly FixtureId[];
 
 async function measureLintCase(
   benchmark: LintBenchmarkCase,
@@ -103,6 +113,59 @@ async function measureLintCase(
         warnings: last.warningCount,
         retainedDiagnostics,
         suppressedDiagnostics,
+      },
+    },
+    samples,
+  );
+}
+
+async function measureObjectLintCase(
+  fixtureId: FixtureId,
+): Promise<BenchmarkCaseResult> {
+  const fixture = createFixture(fixtureId);
+  const sourceBytes = Buffer.byteLength(fixture.source);
+  const value = JSON.parse(fixture.source) as unknown;
+  const execute = () =>
+    lintGeoJSON(value, {
+      filename: `${fixture.id}.geojson`,
+      config: { extends: ['geolint/recommended'] },
+    });
+  await execute();
+  const samples: number[] = [];
+  let last!: Awaited<ReturnType<typeof execute>>;
+  for (let index = 0; index < sampleCount(sourceBytes); index += 1) {
+    const startedAt = performance.now();
+    last = await execute();
+    samples.push(performance.now() - startedAt);
+  }
+  if (
+    last.summary?.featureCount !== fixture.expectedFeatures ||
+    last.summary?.totalVertices !== fixture.expectedVertices ||
+    last.errorCount !== 0
+  ) {
+    throw new Error(`Object benchmark invariant failed for ${fixture.id}.`);
+  }
+  const elapsed = median(samples) / 1_000;
+  return result(
+    {
+      id: `object/${fixture.id}`,
+      group: 'product-lint',
+      fixture: fixture.id,
+      profile: 'recommended',
+      strategy: 'object',
+      sourceBytes,
+      megabytesPerSecond: round(sourceBytes / 1_000_000 / elapsed),
+      ...(fixture.expectedFeatures > 0
+        ? { featuresPerSecond: round(fixture.expectedFeatures / elapsed) }
+        : {}),
+      ...(fixture.expectedVertices > 0
+        ? { verticesPerSecond: round(fixture.expectedVertices / elapsed) }
+        : {}),
+      semanticCounts: {
+        features: fixture.expectedFeatures,
+        vertices: fixture.expectedVertices,
+        errors: last.errorCount,
+        warnings: last.warningCount,
       },
     },
     samples,
@@ -650,6 +713,9 @@ export async function runBenchmarks(
   const cases: BenchmarkCaseResult[] = [];
   for (const benchmark of lintCases)
     cases.push(await measureLintCase(benchmark));
+  for (const fixture of objectFixtures) {
+    cases.push(await measureObjectLintCase(fixture));
+  }
   cases.push(
     measureIndexedDetail('duplicate-losing-100k'),
     measureIndexedDetail('duplicate-winning-100k'),
@@ -676,6 +742,10 @@ export async function runProfileCase(id: string): Promise<BenchmarkCaseResult> {
   if (id === 'indexed-detail/duplicate-losing-100k') {
     return measureIndexedDetail('duplicate-losing-100k');
   }
+  const objectFixture = objectFixtures.find(
+    (fixture) => id === `object/${fixture}`,
+  );
+  if (objectFixture) return measureObjectLintCase(objectFixture);
   const benchmark = lintCases.find((candidate) => candidate.id === id);
   if (!benchmark)
     throw new TypeError(`Unknown benchmark case ${JSON.stringify(id)}.`);

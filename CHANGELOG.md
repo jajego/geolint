@@ -10,7 +10,7 @@ GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stab
 - Reduced cold CLI startup by routing `--version` and `--help` before the lint subsystem loads, and loading `jiti` only for JavaScript or TypeScript configuration.
 - Made already-parsed JSON-value validation iterative so deeply nested input does not exhaust the JavaScript call stack.
 - Made GeometryCollection semantic traversal stack-safe for deeply nested valid GeoJSON.
-- Reduced parsed-object validation allocation by inspecting own names with targeted descriptors instead of materializing full descriptor maps.
+- Improved `lintGeoJSON()` performance for large parsed GeoJSON values.
 
 ## 0.1.2 - 2026-08-15
 
