@@ -79,6 +79,9 @@ export function formatSnapshot(proposal: SnapshotProposal): string {
     lines.push(formatTerminalText(entry.filePath), '  removed', '');
   const changed =
     proposal.added.length + proposal.updated.length + proposal.removed.length;
-  lines.push(`${changed} ${changed === 1 ? 'file' : 'files'} changed.`);
+  lines.push(
+    `${changed} ${changed === 1 ? 'file' : 'files'} changed.`,
+    `Baseline written: ${formatTerminalText(proposal.baselinePath)}`,
+  );
   return `${lines.join('\n')}\n`;
 }

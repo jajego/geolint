@@ -514,6 +514,38 @@ test('regression exposes no-baseline and incomplete-fact skips', () => {
   );
 });
 
+test('strict regression coverage reports one missing baseline diagnostic', () => {
+  const result = evaluate(
+    {
+      requireBaseline: true,
+      checks: {
+        properties: { added: 'error' },
+        duplicateIds: { increased: 'error' },
+      },
+    },
+    current(),
+    false,
+  );
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(
+    result.diagnostics.diagnostics.map(({ code, source }) => ({
+      code,
+      source,
+    })),
+    [{ code: 'regression/missing-baseline', source: 'regression' }],
+  );
+});
+
+test('strict coverage is inert without an enabled regression policy', () => {
+  const result = evaluate(
+    { requireBaseline: true, checks: { properties: { added: 'off' } } },
+    current(),
+    false,
+  );
+  assert.equal(result.diagnostics.errorCount, 0);
+  assert.deepEqual(result.skipped, []);
+});
+
 test('each regression family skips only its own incomplete fact', () => {
   const config: RegressionConfig = {
     checks: {

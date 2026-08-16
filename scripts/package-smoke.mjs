@@ -216,6 +216,36 @@ export default defineConfig({
       'valid.geojson',
     ),
   );
+  await writeFile(
+    join(consumer, 'strict-baseline.json'),
+    JSON.stringify({
+      regression: {
+        baseline: '.geolint-baseline.json',
+        requireBaseline: true,
+        thresholds: { totalVerticesIncrease: { minimumIncrease: 0 } },
+      },
+    }),
+  );
+  const missingBaseline = runCli(
+    [
+      '--config',
+      'strict-baseline.json',
+      '--format',
+      'json',
+      'valid-copy.geojson',
+    ],
+    consumer,
+    [1],
+  );
+  assert.equal(
+    JSON.parse(missingBaseline.stdout).files[0].diagnostics[0].code,
+    'regression/missing-baseline',
+  );
+  runCli(
+    ['--config', 'strict-baseline.json', 'snapshot', 'valid-copy.geojson'],
+    consumer,
+  );
+  runCli(['--config', 'strict-baseline.json', 'valid-copy.geojson'], consumer);
 
   await writeFile(
     join(consumer, 'consumer.ts'),
@@ -223,7 +253,7 @@ export default defineConfig({
 import type { FileLintResult, GeoLintConfig, GeoLintPlugin, LintResult } from '@jajego/geolint';
 const rule = defineRule({ meta: { name: 'typed', schema: null }, create: () => ({}) });
 const plugin: GeoLintPlugin = definePlugin({ meta: { apiVersion: 1 }, rules: { typed: rule } });
-const config: GeoLintConfig = defineConfig({ plugins: { demo: plugin } });
+const config: GeoLintConfig = defineConfig({ plugins: { demo: plugin }, regression: { requireBaseline: true } });
 const file: Promise<FileLintResult> = lintGeoJSONText('{}');
 const batch: Promise<LintResult> = lintFiles({ workers: 1 });
 void config; void file; void batch;

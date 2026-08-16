@@ -2,6 +2,17 @@
 
 GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stable release, `0.x` changes may refine public contracts and are documented here.
 
+## 0.1.5 - 2026-08-16
+
+### Added
+
+- Add optional `regression.requireBaseline` coverage for CI workflows that require every regression-governed artifact to have approved baseline state.
+
+### Changed
+
+- Clarify artifact-baseline, snapshot, permissive, and strict CI workflows. Missing baseline entries continue to produce visible skips by default.
+- Identify the baseline file written by `geolint snapshot`.
+
 ## 0.1.4 - 2026-08-16
 
 ### Changed

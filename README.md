@@ -87,7 +87,19 @@ export default {
 
 Generated geospatial artifacts can change materially without a source-code diff making the impact obvious. A committed baseline lets CI compare the artifact itself: file and vertex growth, geometry distribution, property shape, ID quality, and other tracked facts.
 
-Start with ordinary linting. When regression protection is useful, create and review a baseline:
+Regression baselines are artifact references, not suppression lists: they do **not** accept or hide rule, budget, or plugin diagnostics. Choose at least one regression threshold or check in configuration, then create and review a baseline:
+
+```js
+// geolint.config.mjs
+export default {
+  regression: {
+    baseline: '.geolint-baseline.json',
+    thresholds: {
+      totalVerticesIncrease: { percentage: 10, minimumIncrease: 1_000 },
+    },
+  },
+};
+```
 
 ```sh
 npx geolint snapshot

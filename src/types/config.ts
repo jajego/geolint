@@ -61,6 +61,8 @@ export interface RegressionThresholds {
 
 export interface RegressionConfig {
   readonly baseline?: string;
+  /** Fail when an enabled regression policy has no approved file entry. */
+  readonly requireBaseline?: boolean;
   readonly checks?: RegressionChecks;
   readonly thresholds?: RegressionThresholds;
 }

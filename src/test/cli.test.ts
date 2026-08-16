@@ -93,6 +93,110 @@ test('snapshot command writes a baseline and prints its proposal', async () => {
   }
 });
 
+test('strict regression coverage requires a targeted snapshot for a new file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geolint-cli-strict-baseline-'));
+  try {
+    await mkdir(join(root, 'maps'));
+    for (const name of ['a.geojson', 'b.geojson'])
+      await writeFile(
+        join(root, 'maps', name),
+        JSON.stringify({ type: 'Point', coordinates: [0, 0] }),
+      );
+    await writeFile(
+      join(root, 'geolint.json'),
+      JSON.stringify({
+        files: ['maps/*.geojson'],
+        regression: {
+          requireBaseline: true,
+          thresholds: { totalVerticesIncrease: { minimumIncrease: 0 } },
+        },
+      }),
+    );
+    const config = ['--config', 'geolint.json'];
+    assert.equal(runResult(config, { cwd: root }).status, 1);
+    assert.equal(runResult([...config, 'snapshot'], { cwd: root }).status, 0);
+    assert.equal(runResult(config, { cwd: root }).status, 0);
+    await writeFile(
+      join(root, 'maps', 'c.geojson'),
+      JSON.stringify({
+        type: 'MultiPoint',
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      }),
+    );
+    const missing = runResult([...config, '--format', 'json'], { cwd: root });
+    assert.equal(missing.status, 1);
+    const result = JSON.parse(missing.stdout);
+    assert.deepEqual(
+      result.files.at(-1).diagnostics.map(({ code }: { code: string }) => code),
+      ['regression/missing-baseline'],
+    );
+    assert.equal(
+      runResult([...config, 'snapshot', 'maps/c.geojson'], { cwd: root })
+        .status,
+      0,
+    );
+    assert.equal(runResult(config, { cwd: root }).status, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('strict coverage applies only to regression-enabled overrides', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geolint-cli-strict-override-'));
+  try {
+    await mkdir(join(root, 'maps', 'critical'), { recursive: true });
+    await mkdir(join(root, 'maps', 'archive'));
+    for (const [path, value] of [
+      ['maps/critical/map.geojson', [0, 0]],
+      ['maps/archive/map.geojson', [1, 1]],
+    ] as const)
+      await writeFile(
+        join(root, path),
+        JSON.stringify({ type: 'Point', coordinates: value }),
+      );
+    await writeFile(
+      join(root, 'geolint.json'),
+      JSON.stringify({
+        files: ['maps/**/*.geojson'],
+        regression: { requireBaseline: true },
+        overrides: [
+          {
+            files: ['maps/critical/**'],
+            regression: {
+              thresholds: { totalVerticesIncrease: { minimumIncrease: 0 } },
+            },
+          },
+        ],
+      }),
+    );
+    const output = runResult(['--config', 'geolint.json', '--format', 'json'], {
+      cwd: root,
+    });
+    assert.equal(output.status, 1);
+    const result = JSON.parse(output.stdout);
+    assert.deepEqual(
+      result.files.map(
+        ({
+          filePath,
+          errorCount,
+        }: {
+          filePath: string;
+          errorCount: number;
+        }) => ({ filePath, errorCount }),
+      ),
+      [
+        { filePath: 'maps/archive/map.geojson', errorCount: 0 },
+        { filePath: 'maps/critical/map.geojson', errorCount: 1 },
+      ],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('built CLI workers preserve JSON stdout and reload configured plugins', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geolint-cli-workers-'));
   const pluginUrl = new URL('./fixtures/worker-plugin.js', import.meta.url)
@@ -629,7 +733,10 @@ test('source-aware stdin works and regression stdin requires a filename', async 
     await writeFile(
       join(root, 'regression.json'),
       JSON.stringify({
-        regression: { checks: { properties: { added: 'error' } } },
+        regression: {
+          requireBaseline: true,
+          checks: { properties: { added: 'error' } },
+        },
       }),
     );
     const regression = runResult(['--config', 'regression.json', '-'], {
@@ -638,6 +745,23 @@ test('source-aware stdin works and regression stdin requires a filename', async 
     });
     assert.equal(regression.status, 2);
     assert.match(regression.stderr, /GEOLINT_UNSTABLE_REGRESSION_IDENTITY/);
+    const strict = runResult(
+      [
+        '--config',
+        'regression.json',
+        '--stdin-filename',
+        'public/new.geojson',
+        '--format',
+        'json',
+        '-',
+      ],
+      { cwd: root, input: '{"type":"Point","coordinates":[0,0]}' },
+    );
+    assert.equal(strict.status, 1);
+    assert.equal(
+      JSON.parse(strict.stdout).files[0].diagnostics[0].code,
+      'regression/missing-baseline',
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

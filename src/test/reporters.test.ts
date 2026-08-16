@@ -471,6 +471,7 @@ test('pretty snapshot reports stable useful diffs without unchanged noise', () =
     /added\.geojson\n {2}added\n {2}4 features · 6 vertices · 2\.0 KB/,
   );
   assert.match(output, /removed\.geojson\n {2}removed/);
+  assert.match(output, /Baseline written: baseline\.json/);
   assert.doesNotMatch(output, /unchanged\.geojson/);
   assert.equal(
     output,

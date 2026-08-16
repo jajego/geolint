@@ -404,6 +404,13 @@ export function compileRegression(
     exactFileBytes,
     finish(summary) {
       if (!baseline) {
+        if (config.requireBaseline && policies.length > 0) {
+          report(diagnostics, 'regression/missing-baseline', 'error', () => ({
+            message: 'No approved regression baseline exists for this file.',
+            data: {},
+          }));
+          return [];
+        }
         return policies.map((policy) => ({
           code: policy.code,
           source: 'regression' as const,

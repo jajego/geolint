@@ -1,6 +1,6 @@
 {
   "name": "@jajego/geolint",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Quality gates for production GeoJSON: data quality, delivery budgets, and regression checks.",
   "keywords": [
     "geojson",

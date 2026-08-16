@@ -7,7 +7,12 @@ import {
 
 const diagnosticKeys = new Set(['maxPerCodePerFile', 'maxPerFile']);
 const severityValues = new Set(['off', 'warn', 'error']);
-const regressionKeys = new Set(['baseline', 'checks', 'thresholds']);
+const regressionKeys = new Set([
+  'baseline',
+  'requireBaseline',
+  'checks',
+  'thresholds',
+]);
 const propertyTypeCheckKeys = new Set(['widened', 'narrowed', 'changed']);
 const addedRemovedCheckKeys = new Set(['added', 'removed']);
 const increasedCheckKeys = new Set(['increased']);
@@ -113,6 +118,12 @@ function validateRegression(value: unknown, path: string): void {
       regression.baseline.length === 0)
   ) {
     invalidConfig(`${path}.baseline`, 'a non-empty string');
+  }
+  if (
+    'requireBaseline' in regression &&
+    typeof regression.requireBaseline !== 'boolean'
+  ) {
+    invalidConfig(`${path}.requireBaseline`, 'a boolean');
   }
   if ('checks' in regression) {
     const checks = configRecord(regression.checks, `${path}.checks`);

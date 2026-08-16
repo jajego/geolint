@@ -335,6 +335,7 @@ test('Phase 1 config validation rejects malformed known structures', () => {
     { overrides: [{ files: 123 }] },
     { overrides: [{ files: [] }] },
     { regression: { baseline: 42 } },
+    { regression: { requireBaseline: 'yes' } },
     { overrides: [{ files: ['**'], regression: { baseline: 'other.json' } }] },
     new Date(),
   ];
@@ -377,6 +378,7 @@ test('merge semantics preserve each V5 field contract', () => {
       },
       regression: {
         baseline: 'baseline.json',
+        requireBaseline: true,
         thresholds: {
           fileSizeIncrease: { percentage: 10, minimumIncrease: '1KB' },
         },
@@ -392,6 +394,7 @@ test('merge semantics preserve each V5 field contract', () => {
         featureCount: { severity: 'error' },
       },
       regression: {
+        requireBaseline: false,
         thresholds: { fileSizeIncrease: { percentage: 20 } },
         checks: { propertyTypes: { widened: 'error' } },
       },
@@ -415,6 +418,7 @@ test('merge semantics preserve each V5 field contract', () => {
     propertyTypes: { widened: 'error', narrowed: 'off' },
   });
   assert.equal(merged.regression?.baseline, 'baseline.json');
+  assert.equal(merged.regression?.requireBaseline, false);
 });
 
 test('logical paths normalize separators and dot segments project-relatively', () => {
@@ -459,6 +463,7 @@ test('regression config is strict at every level', () => {
     validateConfig({
       regression: {
         baseline: 'history/baseline.json',
+        requireBaseline: true,
         checks: { propertyTypes: { widened: 'warn', narrowed: 'off' } },
         thresholds: {
           fileSizeIncrease: { percentage: 0, minimumIncrease: '1KB' },

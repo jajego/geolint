@@ -334,7 +334,7 @@ test('regression baseline results are worker-count invariant', async () => {
   try {
     await snapshotBaseline({
       cwd: directory,
-      targets: ['*.geojson'],
+      targets: ['map-0.geojson'],
       config: {},
     });
     const options: BatchExecutionOptions = {
@@ -342,6 +342,7 @@ test('regression baseline results are worker-count invariant', async () => {
       targets: ['*.geojson'],
       config: {
         regression: {
+          requireBaseline: true,
           thresholds: { totalVerticesIncrease: { percentage: 0 } },
         },
       },
