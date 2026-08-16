@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { createJiti } from 'jiti';
 import { dirname, extname, resolve } from 'node:path';
 
 import { mergeConfig } from './merge.js';
@@ -7,6 +6,11 @@ import { getPreset } from './presets.js';
 import { validateConfig } from './validate.js';
 import { GeoLintConfigError } from '../engine/errors.js';
 import type { GeoLintConfig } from '../types/config.js';
+
+async function jiti(directory: string) {
+  const { createJiti } = await import('jiti');
+  return createJiti(directory, { interopDefault: true });
+}
 
 function isConfig(value: unknown): value is GeoLintConfig {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -18,9 +22,7 @@ async function loadConfig(path: string): Promise<GeoLintConfig> {
     const imported: unknown =
       extname(absolutePath) === '.json'
         ? JSON.parse(await readFile(absolutePath, 'utf8'))
-        : await createJiti(dirname(absolutePath), {
-            interopDefault: true,
-          }).import(absolutePath);
+        : await (await jiti(dirname(absolutePath))).import(absolutePath);
     const loaded =
       extname(absolutePath) === '.json'
         ? imported
@@ -77,10 +79,10 @@ export async function resolveConfigExtends(
       );
       continue;
     }
-    const jiti = createJiti(baseDirectory, { interopDefault: true });
+    const loader = await jiti(baseDirectory);
     let path: string;
     try {
-      path = jiti.resolve(reference);
+      path = loader.resolve(reference);
     } catch {
       throw new GeoLintConfigError(
         `Cannot resolve config extension "${reference}" from ${baseDirectory}.`,

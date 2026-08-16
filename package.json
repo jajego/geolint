@@ -78,6 +78,7 @@
     "benchmark": "npm run build && node dist/benchmark/index.js",
     "benchmark:extended": "npm run build && node dist/benchmark/index.js --extended",
     "benchmark:json": "npm run build && node dist/benchmark/index.js --json",
+    "benchmark:cli": "npm run build && node dist/benchmark/cli-cold.js",
     "benchmark:compare": "npm run build && node dist/benchmark/compare-cli.js",
     "benchmark:targets": "npm run build && node dist/benchmark/targets-profile.js",
     "benchmark:workers": "npm run build && node dist/benchmark/worker-feasibility.js",

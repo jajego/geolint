@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { geolintVersion } from '../version.js';
+import { cliHelp } from '../cli/help.js';
 
 const execFileAsync = promisify(execFile);
 const cliPath = fileURLToPath(new URL('../cli/index.js', import.meta.url));
@@ -42,6 +43,7 @@ test('CLI version derives from package metadata', async () => {
   const { stdout, stderr } = await run(['--help']);
 
   assert.equal(stderr, '');
+  assert.equal(stdout, cliHelp);
   assert.match(stdout, /--print-config <file>/);
   assert.match(stdout, /snapshot \[targets\.\.\.\]/);
   assert.equal(geolintVersion, packageVersion);

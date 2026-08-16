@@ -2,6 +2,13 @@
 
 GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stable release, `0.x` changes may refine public contracts and are documented here.
 
+## 0.1.3 - 2026-08-16
+
+### Changed
+
+- Reduced buffered source-lint overhead while preserving unconditional duplicate JSON key diagnostics.
+- Reduced cold CLI startup by routing `--version` and `--help` before the lint subsystem loads, and loading `jiti` only for JavaScript or TypeScript configuration.
+
 ## 0.1.2 - 2026-08-15
 
 ### Added

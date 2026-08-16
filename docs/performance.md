@@ -8,6 +8,7 @@ GeoLint's benchmark suite measures product linting, parser strategies, source-aw
 npm run benchmark
 npm run benchmark:extended
 npm run benchmark:json
+npm run benchmark:cli
 npm run benchmark:compare -- baseline.json current.json 20
 ```
 
@@ -22,6 +23,8 @@ Ordinary semantic policies use the cheaper buffered strategy. Policies that need
 Fixtures are deterministic and generated before timed regions. Member-order randomization uses a fixed seed. Every warm in-process case, including indexed detail, buffered detail, and multi-rule traversal instrumentation, runs one complete discarded warmup before fresh per-sample instrumentation is collected. Inputs of at least 5 MB use three measured samples and smaller inputs use five; the median is primary. Fixture byte counts are computed before timing.
 
 Cold-start cases launch a fresh built CLI process for each of five samples. They separately measure `--version`, `--help`, and a small clean JSON lint. They are not compared with warm engine throughput.
+
+`npm run benchmark:cli` is the focused cold-process check. It runs seven measured child processes (after two warmups) for metadata commands, tiny no-config/configured files, a nested no-config discovery path, and small/large file controls.
 
 Peak RSS cases each run in a dedicated child process and report the larger of Node's process RSS and `resourceUsage().maxRSS`. The measurement includes the source text and fixture representation resident in that process. It is not a constant-memory claim and is not directly comparable across operating systems.
 
@@ -107,6 +110,10 @@ The buffered duplicate-source profile identified redundant grammar validation, p
 The subsequent structural scanner retains the same trusted-valid contract but visits only JSON container punctuation, strings, and object keys. It preserves duplicate paths and byte offsets without re-walking scalar grammar. Release-to-release measurements found 19–24% lower public source-lint latency than 0.1.2 on large coordinate-, Feature-, and property-heavy fixtures, with unchanged peak RSS on the measured 1m-coordinate and 100k-Feature cases.
 
 No indexed-parser, semantic-scanner, rule-dispatch, diagnostic, or planner optimization was retained. Profiles showed their costs correspond to required work, and no additional small change met the evidence threshold.
+
+## CLI bootstrap
+
+The CLI entry parses arguments before loading the full command implementation. `--help` returns from shared help text, and `--version` reads the authoritative package version, without importing the lint engine, reporters, target discovery, or configuration runtime. Lint commands then cross one lazy boundary into the existing CLI implementation. `jiti` is loaded only when a JavaScript or TypeScript config actually needs execution; JSON and no-config runs do not initialize it.
 
 ## Target discovery
 
