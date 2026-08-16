@@ -1,0 +1,6 @@
+{
+  "name": "@fixture/geolint-plugin-consumer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module"
+}

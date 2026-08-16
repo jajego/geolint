@@ -9,6 +9,11 @@ test('defineConfig preserves configuration values', () => {
   assert.deepEqual(config, { files: ['public/**/*.geojson'] });
 });
 
+test('lintFiles exposes its worker control to Node API consumers', () => {
+  const options = { workers: 1 } satisfies geolint.LintFilesOptions;
+  void options;
+});
+
 test('root module exports only implemented consumer APIs', () => {
   assert.deepEqual(Object.keys(geolint), [
     'GeoLintBatchError',

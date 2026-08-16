@@ -2,6 +2,17 @@
 
 GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stable release, `0.x` changes may refine public contracts and are documented here.
 
+## 0.1.4 - 2026-08-16
+
+### Changed
+
+- Expose existing `lintFiles()` worker configuration through the public TypeScript API.
+- Expand plugin-author guidance for lifecycle, options, aggregate rules, source-aware rules, workers, testing, and packaging.
+
+### Internal
+
+- Strengthen packed external-plugin and worker integration coverage.
+
 ## 0.1.3 - 2026-08-16
 
 ### Changed

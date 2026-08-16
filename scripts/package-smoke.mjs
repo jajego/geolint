@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -225,7 +225,7 @@ const rule = defineRule({ meta: { name: 'typed', schema: null }, create: () => (
 const plugin: GeoLintPlugin = definePlugin({ meta: { apiVersion: 1 }, rules: { typed: rule } });
 const config: GeoLintConfig = defineConfig({ plugins: { demo: plugin } });
 const file: Promise<FileLintResult> = lintGeoJSONText('{}');
-const batch: Promise<LintResult> = lintFiles();
+const batch: Promise<LintResult> = lintFiles({ workers: 1 });
 void config; void file; void batch;
 `,
   );
@@ -244,6 +244,66 @@ void config; void file; void batch;
     }),
   );
   run(process.execPath, [tsc, '-p', 'tsconfig.json'], consumer);
+
+  const fixture = join(repository, 'fixtures', 'external-plugin');
+  const fixtureConsumer = join(repository, 'fixtures', 'external-consumer');
+  const fixturePluginDirectory = join(consumer, 'plugin');
+  await mkdir(fixturePluginDirectory);
+  await cp(join(fixture, 'src'), join(fixturePluginDirectory, 'src'), {
+    recursive: true,
+  });
+  await cp(
+    join(fixture, 'tsconfig.json'),
+    join(fixturePluginDirectory, 'tsconfig.json'),
+  );
+  await cp(
+    join(fixture, 'package.json'),
+    join(fixturePluginDirectory, 'package.json'),
+  );
+  run(process.execPath, [tsc, '-p', 'tsconfig.json'], fixturePluginDirectory);
+  const pluginDetails = JSON.parse(
+    runNpm(
+      ['pack', '--json', '--pack-destination', consumer],
+      fixturePluginDirectory,
+    ).stdout,
+  )[0];
+  assert.equal(pluginDetails.name, '@fixture/geolint-plugin-quality');
+  assert.ok(pluginDetails.files.some(({ path }) => path === 'dist/index.d.ts'));
+  const pluginTarball = join(consumer, pluginDetails.filename);
+  runNpm(
+    ['install', pluginTarball, '--ignore-scripts', '--no-audit', '--no-fund'],
+    consumer,
+  );
+  await cp(
+    join(fixtureConsumer, 'geolint.config.mjs'),
+    join(consumer, 'geolint.config.mjs'),
+  );
+  await cp(join(fixtureConsumer, 'maps'), join(consumer, 'maps'), {
+    recursive: true,
+  });
+  const sequentialPlugin = runCli(
+    ['maps', '--workers', '1', '--no-color'],
+    consumer,
+    [1],
+  );
+  const parallelPlugin = runCli(
+    ['maps', '--workers', '2', '--no-color'],
+    consumer,
+    [1],
+  );
+  const stableOutput = (value) => value.replace(/· \d+ ms/g, '· <ms>');
+  assert.equal(
+    stableOutput(parallelPlugin.stdout),
+    stableOutput(sequentialPlugin.stdout),
+  );
+  for (const rule of [
+    'quality/require-feature-id',
+    'quality/allowed-property-values',
+    'quality/unique-property-value',
+    'quality/coordinate-precision',
+  ]) {
+    assert.match(parallelPlugin.stdout, new RegExp(rule));
+  }
 
   process.stdout.write(
     `Packed consumer smoke passed (${details.entryCount} files, ${details.size} packed bytes, ${details.unpackedSize} unpacked bytes).\n`,

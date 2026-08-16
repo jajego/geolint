@@ -39,6 +39,8 @@ import {
 
 export interface LintFilesOptions extends GeoLintRuntimeContext {
   readonly targets?: readonly string[];
+  /** Maximum file-level worker concurrency; 1 is strictly sequential. */
+  readonly workers?: number;
 }
 
 export interface BatchExecutionOptions

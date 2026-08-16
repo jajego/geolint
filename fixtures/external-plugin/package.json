@@ -1,0 +1,19 @@
+{
+  "name": "@fixture/geolint-plugin-quality",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "peerDependencies": {
+    "@jajego/geolint": "^0.1.4"
+  },
+  "devDependencies": {
+    "@jajego/geolint": "^0.1.4",
+    "typescript": "^5.8.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}
