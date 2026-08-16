@@ -244,6 +244,25 @@ test('buffered duplicate scanning handles scalar roots and escaped key equivalen
   );
 });
 
+test('trusted duplicate scanning ignores structural punctuation inside values', async () => {
+  const source =
+    '{"type":"Feature","properties":{"text":"{[,\\"]},:","nested":{"x":1,"x":2},"items":["}],{",{"y":1,"y":2}]},"geometry":null}';
+  const buffered = await lintGeoJSONTextWithParser(source, {
+    parser: 'buffered',
+    config: {},
+  });
+  const indexed = await lintGeoJSONTextWithParser(source, {
+    parser: 'indexed',
+    config: {},
+  });
+
+  assert.deepEqual(buffered.diagnostics, indexed.diagnostics);
+  assert.deepEqual(
+    buffered.diagnostics.map(({ path }) => path),
+    ['/properties/nested/x', '/properties/items/1/y'],
+  );
+});
+
 test('duplicate equality is exact and object-local', async () => {
   const composed = String.fromCharCode(0x00e9);
   const decomposed = `e${String.fromCharCode(0x0301)}`;

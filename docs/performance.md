@@ -104,6 +104,8 @@ The many-Feature profile identified repeated JSON Pointer escaping for numeric F
 
 The buffered duplicate-source profile identified redundant grammar validation, path allocation, UTF-8 accounting, and per-object allocation after native parsing. The trusted-valid scanner reduced focused duplicate-scan medians from 31.3 to 9.4 ms for 100k coordinates and from 246.7 to 120.6 ms for 100k tiny Features; focused total buffered medians fell from 41.2 to 27.4 ms and from 343.8 to 223.5 ms respectively.
 
+The subsequent structural scanner retains the same trusted-valid contract but visits only JSON container punctuation, strings, and object keys. It preserves duplicate paths and byte offsets without re-walking scalar grammar. Release-to-release measurements found 19–24% lower public source-lint latency than 0.1.2 on large coordinate-, Feature-, and property-heavy fixtures, with unchanged peak RSS on the measured 1m-coordinate and 100k-Feature cases.
+
 No indexed-parser, semantic-scanner, rule-dispatch, diagnostic, or planner optimization was retained. Profiles showed their costs correspond to required work, and no additional small change met the evidence threshold.
 
 ## Target discovery
