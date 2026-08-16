@@ -10,6 +10,21 @@ const valid = {
   geometry: { type: 'Point', coordinates: [1, 2] },
 };
 
+function deeplyNested(
+  kind: 'array' | 'object' | 'mixed',
+  depth: number,
+  leaf: unknown,
+): unknown {
+  let value = leaf;
+  for (let index = 0; index < depth; index += 1) {
+    value =
+      kind === 'array' || (kind === 'mixed' && index % 2 === 0)
+        ? [value]
+        : { value };
+  }
+  return value;
+}
+
 test('lintGeoJSON accepts the strict JSON data model', async () => {
   const nullPrototype = Object.assign(
     Object.create(null) as Record<string, unknown>,
@@ -104,6 +119,41 @@ test('lintGeoJSON rejects JavaScript-only values with a stable error', async (co
       );
     });
   }
+});
+
+test('lintGeoJSON validates deeply nested values without using the JavaScript call stack', async () => {
+  for (const kind of ['array', 'object', 'mixed'] as const) {
+    const result = await lintGeoJSON(deeplyNested(kind, 12_000, null), {
+      config: {},
+    });
+    assert.equal(result.diagnostics[0]?.code, 'geojson/invalid-root');
+  }
+
+  const invalid = deeplyNested('object', 10_000, undefined);
+  await assert.rejects(
+    lintGeoJSON(invalid, { config: {} }),
+    (error) =>
+      error instanceof GeoLintInputError &&
+      error.code === 'GEOLINT_INVALID_JSON_VALUE' &&
+      error.message.includes('/value'),
+  );
+
+  const cycle = deeplyNested('object', 10_000, null) as { value: unknown };
+  let leaf = cycle;
+  while (
+    leaf.value !== null &&
+    typeof leaf.value === 'object' &&
+    'value' in leaf.value
+  ) {
+    leaf = leaf.value as { value: unknown };
+  }
+  leaf.value = cycle;
+  await assert.rejects(
+    lintGeoJSON(cycle, { config: {} }),
+    (error) =>
+      error instanceof GeoLintInputError &&
+      error.code === 'GEOLINT_INVALID_JSON_VALUE',
+  );
 });
 
 test('lintGeoJSONText reports malformed JSON without leaking SyntaxError', async () => {
