@@ -2,7 +2,7 @@
 
 GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stable release, `0.x` changes may refine public contracts and are documented here.
 
-## Unreleased
+## 0.1.2 - 2026-08-15
 
 ### Added
 
