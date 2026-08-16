@@ -378,6 +378,18 @@ export function indexedCoordinateSpan(
   };
 }
 
+export function indexedCoordinateTextSpan(value: IndexedCoordinateValue): {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+} {
+  return {
+    text: value.source.text,
+    start: value.span.start,
+    end: value.span.end,
+  };
+}
+
 export function indexedFeatureSpan(value: object): SourceSpan | undefined {
   return featureSpans.get(value);
 }

@@ -5,10 +5,17 @@ import type {
 } from '../engine/requirements.js';
 import { appendPointer, jsonPointer } from './json-pointer.js';
 import {
+  directCoordinateElements,
+  directPosition,
+  type DirectCoordinateKind,
+  type DirectPosition,
+} from '../parser/direct-coordinates.js';
+import {
   indexedCoordinateElements,
   indexedCoordinateKind,
   indexedCoordinateNumber,
   indexedCoordinateSpan,
+  indexedCoordinateTextSpan,
   indexedFeatureSpan,
   indexedSequenceElements,
   isIndexedCoordinateValue,
@@ -96,6 +103,7 @@ interface MutablePropertyStats {
 interface ScanState {
   readonly filePath: string;
   readonly requirements: ExecutionRequirements;
+  readonly forceGenericIndexedCoordinates: boolean;
   readonly listener?: SemanticListener;
   readonly instrumentation?: ScanInstrumentation;
   readonly coordinateObservation?: CoordinateObservation;
@@ -131,6 +139,7 @@ export interface ScanInstrumentation {
   positionVisits: number;
   coordinatePathMaterializations: number;
   propertyPathMaterializations: number;
+  directCoordinateTraversals?: number;
   rawLexemeCollections?: number;
   coordinateLexemeEvents?: number;
 }
@@ -146,6 +155,8 @@ export interface ScanOptions {
   readonly featureIdObservation?: FeatureIdObservation;
   readonly featureByteObservation?: FeatureByteObservation;
   readonly diagnostics?: DiagnosticCollector;
+  /** Test-only differential seam; production uses capability routing. */
+  readonly forceGenericIndexedCoordinates?: boolean;
 }
 
 export type CoordinateObservation = (
@@ -469,26 +480,20 @@ function positionValues(
   };
 }
 
-function visitPosition(
-  value: CoordinateValue,
+interface PositionValues {
+  readonly values: readonly number[];
+  readonly rawValues?: readonly string[];
+  readonly byteOffset?: number;
+}
+
+function observePosition(
+  position: PositionValues,
   parentPath: JsonPointer,
   positionIndex: number | undefined,
   featureIndex: number | undefined,
   metrics: GeometryMetrics,
   state: ScanState,
 ): void {
-  if (!isCoordinateArray(value)) {
-    if (state.instrumentation) state.instrumentation.positionVisits += 1;
-    invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
-    return;
-  }
-  const position = positionValues(value, state);
-  if (!position) {
-    if (state.instrumentation) state.instrumentation.positionVisits += 1;
-    invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
-    return;
-  }
-
   if (state.instrumentation) state.instrumentation.positionVisits += 1;
   metrics.vertices += 1;
   if (state.requirements.vertexCounts) state.totalVertices += 1;
@@ -549,6 +554,36 @@ function visitPosition(
       byteOffset: position.byteOffset,
     });
   }
+}
+
+function visitPosition(
+  value: CoordinateValue,
+  parentPath: JsonPointer,
+  positionIndex: number | undefined,
+  featureIndex: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+): void {
+  if (!isCoordinateArray(value)) {
+    if (state.instrumentation) state.instrumentation.positionVisits += 1;
+    invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
+    return;
+  }
+  const position = positionValues(value, state);
+  if (!position) {
+    if (state.instrumentation) state.instrumentation.positionVisits += 1;
+    invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
+    return;
+  }
+
+  observePosition(
+    position,
+    parentPath,
+    positionIndex,
+    featureIndex,
+    metrics,
+    state,
+  );
 }
 
 function visitPositions(
@@ -651,6 +686,302 @@ function scanLine(
   visitPositions(values, path, featureIndex, metrics, state);
 }
 
+function observeDirectPosition(
+  position: DirectPosition,
+  parentPath: JsonPointer,
+  positionIndex: number | undefined,
+  featureIndex: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+): void {
+  if (state.instrumentation) state.instrumentation.positionVisits += 1;
+  metrics.vertices += 1;
+  if (state.requirements.vertexCounts) state.totalVertices += 1;
+  const dimensionKey =
+    position.length === 2
+      ? 'two'
+      : position.length === 3
+        ? 'three'
+        : 'fourOrMore';
+  metrics.dimensions[dimensionKey] += 1;
+  if (state.requirements.coordinateDimensions)
+    state.dimensions[dimensionKey] += 1;
+  if (state.requirements.geometrySummaries) {
+    metrics.bounds = updateBounds(metrics.bounds, position.x, position.y);
+  }
+  if (state.requirements.geographicExtents) {
+    state.bounds = updateBounds(state.bounds, position.x, position.y);
+  }
+  if (position.values) {
+    state.coordinateObservation?.(
+      position.values,
+      featureIndex,
+      parentPath,
+      positionIndex,
+    );
+    if (state.listener?.coordinate) {
+      state.listener.coordinate({
+        ...(featureIndex === undefined ? {} : { featureIndex }),
+        values: position.values,
+        path: positionPath(parentPath, positionIndex, state),
+      });
+    }
+  }
+}
+
+function directVisitPosition(
+  text: string,
+  start: number,
+  end: number,
+  kind: DirectCoordinateKind,
+  parentPath: JsonPointer,
+  positionIndex: number | undefined,
+  featureIndex: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+): void {
+  const position = directPosition(
+    text,
+    start,
+    end,
+    kind,
+    Boolean(state.coordinateObservation || state.listener?.coordinate),
+  );
+  if (!position) {
+    if (state.instrumentation) state.instrumentation.positionVisits += 1;
+    invalidPosition(parentPath, positionIndex, featureIndex, metrics, state);
+    return;
+  }
+  observeDirectPosition(
+    position,
+    parentPath,
+    positionIndex,
+    featureIndex,
+    metrics,
+    state,
+  );
+}
+
+function directScanLine(
+  text: string,
+  start: number,
+  end: number,
+  path: JsonPointer,
+  featureIndex: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+  ring: boolean,
+): void {
+  const minimum = ring ? 4 : 2;
+  let length = 0;
+  let firstStart = 0;
+  let firstEnd = 0;
+  let firstKind: DirectCoordinateKind = 'other';
+  let lastStart = 0;
+  let lastEnd = 0;
+  let lastKind: DirectCoordinateKind = 'other';
+  directCoordinateElements(
+    text,
+    start,
+    end,
+    (positionStart, positionEnd, kind) => {
+      if (length === 0) {
+        firstStart = positionStart;
+        firstEnd = positionEnd;
+        firstKind = kind;
+      }
+      lastStart = positionStart;
+      lastEnd = positionEnd;
+      lastKind = kind;
+      length += 1;
+    },
+  );
+  if (length < minimum) {
+    invalidCoordinates(
+      path,
+      featureIndex,
+      metrics,
+      state,
+      ring
+        ? 'Expected a linear ring containing at least four Positions.'
+        : 'Expected a LineString containing at least two Positions.',
+    );
+  } else if (ring) {
+    const firstValues = directPosition(
+      text,
+      firstStart,
+      firstEnd,
+      firstKind,
+      true,
+    );
+    const lastValues = directPosition(text, lastStart, lastEnd, lastKind, true);
+    if (
+      firstValues &&
+      lastValues &&
+      (firstValues.length !== lastValues.length ||
+        firstValues.values!.some(
+          (value, index) => value !== lastValues.values![index],
+        ))
+    ) {
+      invalidCoordinates(
+        path,
+        featureIndex,
+        metrics,
+        state,
+        'Expected a linear ring whose first and last Positions are identical.',
+      );
+    }
+  }
+  let index = 0;
+  directCoordinateElements(
+    text,
+    start,
+    end,
+    (positionStart, positionEnd, kind) => {
+      directVisitPosition(
+        text,
+        positionStart,
+        positionEnd,
+        kind,
+        path,
+        index,
+        featureIndex,
+        metrics,
+        state,
+      );
+      index += 1;
+    },
+  );
+}
+
+function scanDirectIndexedCoordinateTree(
+  type: GeoJSONGeometryType,
+  coordinates: IndexedCoordinateValue,
+  coordinatesPath: JsonPointer,
+  featureIndex: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+): void {
+  const source = indexedCoordinateTextSpan(coordinates);
+  if (type === 'Point') {
+    directVisitPosition(
+      source.text,
+      source.start,
+      source.end,
+      'array',
+      coordinatesPath,
+      undefined,
+      featureIndex,
+      metrics,
+      state,
+    );
+    return;
+  }
+  if (type === 'MultiPoint' || type === 'LineString') {
+    if (type === 'LineString') {
+      directScanLine(
+        source.text,
+        source.start,
+        source.end,
+        coordinatesPath,
+        featureIndex,
+        metrics,
+        state,
+        false,
+      );
+      return;
+    }
+    let index = 0;
+    directCoordinateElements(
+      source.text,
+      source.start,
+      source.end,
+      (start, end, kind) => {
+        directVisitPosition(
+          source.text,
+          start,
+          end,
+          kind,
+          coordinatesPath,
+          index,
+          featureIndex,
+          metrics,
+          state,
+        );
+        index += 1;
+      },
+    );
+    return;
+  }
+  if (type === 'MultiLineString' || type === 'Polygon') {
+    let index = 0;
+    directCoordinateElements(
+      source.text,
+      source.start,
+      source.end,
+      (start, end, kind) => {
+        if (type === 'Polygon') metrics.ringCount += 1;
+        const partPath = appendPointer(coordinatesPath, index);
+        if (kind !== 'array') {
+          invalidCoordinates(partPath, featureIndex, metrics, state);
+        } else {
+          directScanLine(
+            source.text,
+            start,
+            end,
+            partPath,
+            featureIndex,
+            metrics,
+            state,
+            type === 'Polygon',
+          );
+        }
+        index += 1;
+      },
+    );
+    return;
+  }
+  let polygon = 0;
+  directCoordinateElements(
+    source.text,
+    source.start,
+    source.end,
+    (polygonStart, polygonEnd, polygonKind) => {
+      const polygonPath = appendPointer(coordinatesPath, polygon);
+      if (polygonKind !== 'array') {
+        invalidCoordinates(polygonPath, featureIndex, metrics, state);
+      } else {
+        let ring = 0;
+        directCoordinateElements(
+          source.text,
+          polygonStart,
+          polygonEnd,
+          (ringStart, ringEnd, ringKind) => {
+            metrics.ringCount += 1;
+            const ringPath = appendPointer(polygonPath, ring);
+            if (ringKind !== 'array') {
+              invalidCoordinates(ringPath, featureIndex, metrics, state);
+            } else {
+              directScanLine(
+                source.text,
+                ringStart,
+                ringEnd,
+                ringPath,
+                featureIndex,
+                metrics,
+                state,
+                true,
+              );
+            }
+            ring += 1;
+          },
+        );
+      }
+      polygon += 1;
+    },
+  );
+}
+
 function scanCoordinateTree(
   type: GeoJSONGeometryType,
   coordinates: JsonValue[] | IndexedCoordinateValue,
@@ -660,6 +991,25 @@ function scanCoordinateTree(
   state: ScanState,
 ): void {
   if (state.instrumentation) state.instrumentation.coordinateTraversals += 1;
+  if (
+    !state.forceGenericIndexedCoordinates &&
+    !state.requirements.numericLexemes &&
+    isIndexedCoordinateValue(coordinates)
+  ) {
+    if (state.instrumentation) {
+      state.instrumentation.directCoordinateTraversals =
+        (state.instrumentation.directCoordinateTraversals ?? 0) + 1;
+    }
+    scanDirectIndexedCoordinateTree(
+      type,
+      coordinates,
+      coordinatesPath,
+      featureIndex,
+      metrics,
+      state,
+    );
+    return;
+  }
   if (type === 'Point') {
     visitPosition(
       coordinates,
@@ -1151,6 +1501,8 @@ export function scanGeoJSON(
   const state: ScanState = {
     filePath: options.filePath,
     requirements,
+    forceGenericIndexedCoordinates:
+      options.forceGenericIndexedCoordinates === true,
     ...(options.listener ? { listener: options.listener } : {}),
     ...(options.instrumentation
       ? { instrumentation: options.instrumentation }

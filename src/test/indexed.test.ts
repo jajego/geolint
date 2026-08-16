@@ -11,6 +11,7 @@ import {
   lintGeoJSONTextWithParser,
 } from '../engine/lint-input.js';
 import { GeoLintCapabilityError } from '../engine/errors.js';
+import { DiagnosticCollector } from '../engine/diagnostics.js';
 import {
   createExecutionRequirements,
   type SemanticListener,
@@ -81,6 +82,206 @@ function internalScan(
     sourceBytes: indexed.sourceBytes,
   });
 }
+
+function compareDirectCoordinateTraversal(
+  source: string,
+  listener?: SemanticListener,
+): void {
+  const requirements = createExecutionRequirements({
+    facts: [
+      'featureCount',
+      'vertexCount',
+      'geometryStats',
+      'coordinateDimensionStats',
+      'derivedExtent',
+    ],
+    ...(listener ? { listener } : {}),
+  });
+  const parsed = parseIndexedSource(source, requirements);
+  const regularDiagnostics = new DiagnosticCollector('map.geojson');
+  const directDiagnostics = new DiagnosticCollector('map.geojson');
+  const regular = scanGeoJSON(parsed.value, {
+    filePath: 'map.geojson',
+    requirements,
+    ...(listener ? { listener } : {}),
+    diagnostics: regularDiagnostics,
+  });
+  const direct = scanGeoJSON(parsed.value, {
+    filePath: 'map.geojson',
+    requirements,
+    ...(listener ? { listener } : {}),
+    diagnostics: directDiagnostics,
+    forceGenericIndexedCoordinates: true,
+  });
+  assert.deepEqual(direct, regular);
+  assert.deepEqual(
+    directDiagnostics.diagnostics,
+    regularDiagnostics.diagnostics,
+  );
+  assert.deepEqual(
+    directDiagnostics.suppressedDiagnostics,
+    regularDiagnostics.suppressedDiagnostics,
+  );
+}
+
+test('direct indexed coordinate traversal preserves scanner results', () => {
+  const sources = [
+    '{"type":"Point","coordinates":[1,2]}',
+    '{"type":"MultiPoint","coordinates":[[1,2],[3,4,5],[6]]}',
+    '{"type":"LineString","coordinates":[[1,2]]}',
+    '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}',
+    '{"type":"MultiLineString","coordinates":[[[1,2],[3,4]],[[5,6]]]}',
+    '{"type":"MultiPolygon","coordinates":[[[[0,0],[1,0],[1,1],[0,1],[0,0]]]]}',
+    '{"type":"GeometryCollection","geometries":[{"type":"Point","coordinates":[1,2]},{"type":"LineString","coordinates":[[1,2],[3,4]]}]}',
+    '{"type":"Point","coordinates":[[1,2]]}',
+    '{"type":"Point","coordinates":[1,2],"coordinates":[3,4]}',
+  ];
+  for (const source of sources) compareDirectCoordinateTraversal(source);
+
+  const depth = 20_000;
+  compareDirectCoordinateTraversal(
+    `{"type":"MultiPoint","coordinates":[${'['.repeat(depth)}0${']'.repeat(depth)}]}`,
+  );
+
+  const source =
+    '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}';
+  const run = (forceGenericIndexedCoordinates: boolean) => {
+    const coordinates: unknown[] = [];
+    const lexemes: unknown[] = [];
+    const listener: SemanticListener = {
+      coordinate: (event) => coordinates.push(event),
+      coordinateLexeme: (event) => lexemes.push(event),
+    };
+    const requirements = createExecutionRequirements({ listener });
+    const parsed = parseIndexedSource(source, requirements);
+    const diagnostics = new DiagnosticCollector('map.geojson');
+    const summary = scanGeoJSON(parsed.value, {
+      filePath: 'map.geojson',
+      requirements,
+      listener,
+      diagnostics,
+      forceGenericIndexedCoordinates,
+    });
+    return {
+      summary,
+      diagnostics: diagnostics.diagnostics,
+      coordinates,
+      lexemes,
+    };
+  };
+  assert.deepEqual(run(true), run(false));
+
+  const runCoordinateHook = (forceGenericIndexedCoordinates: boolean) => {
+    const coordinates: unknown[] = [];
+    const listener: SemanticListener = {
+      coordinate: (event) => coordinates.push(event),
+    };
+    const requirements = createExecutionRequirements({ listener });
+    const parsed = parseIndexedSource(source, requirements);
+    scanGeoJSON(parsed.value, {
+      filePath: 'map.geojson',
+      requirements,
+      listener,
+      forceGenericIndexedCoordinates,
+    });
+    return coordinates;
+  };
+  assert.deepEqual(runCoordinateHook(true), runCoordinateHook(false));
+});
+
+test('indexed coordinate routing follows capabilities', async () => {
+  const source =
+    '{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[1,2]}}';
+  const scan = (forceGenericIndexedCoordinates = false) => {
+    const coordinates: unknown[] = [];
+    const listener: SemanticListener = {
+      coordinate: (event) => coordinates.push(event),
+    };
+    const requirements = createExecutionRequirements({
+      facts: ['vertexCount'],
+      featureByteSpans: true,
+      listener,
+    });
+    const parsed = parseIndexedSource(source, requirements);
+    const instrumentation: ScanInstrumentation = {
+      coordinateTraversals: 0,
+      positionVisits: 0,
+      coordinatePathMaterializations: 0,
+      propertyPathMaterializations: 0,
+    };
+    const summary = scanGeoJSON(parsed.value, {
+      filePath: 'map.geojson',
+      requirements,
+      listener,
+      sourceBytes: parsed.sourceBytes,
+      instrumentation,
+      forceGenericIndexedCoordinates,
+    });
+    return { summary, coordinates, instrumentation };
+  };
+  const direct = scan();
+  const generic = scan(true);
+  assert.equal(direct.instrumentation.directCoordinateTraversals, 1);
+  assert.equal(generic.instrumentation.directCoordinateTraversals ?? 0, 0);
+  assert.deepEqual(direct.summary, generic.summary);
+  assert.deepEqual(direct.coordinates, generic.coordinates);
+  assert.equal(
+    direct.summary.largestFeatureBytes,
+    Buffer.byteLength(source, 'utf8'),
+  );
+
+  const lexemeSource =
+    '{"type":"MultiPoint","coordinates":[[1,2],[1.0,2],[1e0,2],[-0,2]]}';
+  const rawValues: string[][] = [];
+  const listener: SemanticListener = {
+    coordinateLexeme: (event) => rawValues.push([...event.rawValues]),
+  };
+  const requirements = createExecutionRequirements({ listener });
+  const parsed = parseIndexedSource(lexemeSource, requirements);
+  const instrumentation: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+    rawLexemeCollections: 0,
+    coordinateLexemeEvents: 0,
+  };
+  scanGeoJSON(parsed.value, {
+    filePath: 'map.geojson',
+    requirements,
+    listener,
+    instrumentation,
+  });
+  assert.equal(instrumentation.directCoordinateTraversals ?? 0, 0);
+  assert.deepEqual(rawValues, [
+    ['1', '2'],
+    ['1.0', '2'],
+    ['1e0', '2'],
+    ['-0', '2'],
+  ]);
+
+  const precision = await lintGeoJSONTextWithParser(lexemeSource, {
+    parser: 'indexed',
+    config: {
+      rules: {
+        'coordinate-precision': ['error', { maximumDecimals: 0 }],
+      },
+    },
+  });
+  assert.deepEqual(
+    precision.diagnostics.map(({ code, data }) => ({ code, data })),
+    [
+      {
+        code: 'coordinate-precision',
+        data: {
+          maximumDecimals: 0,
+          maximumObserved: 1,
+          offendingToken: '1.0',
+        },
+      },
+    ],
+  );
+});
 
 test('forced indexed and buffered strategies preserve ordinary semantics', async () => {
   const sources = [
