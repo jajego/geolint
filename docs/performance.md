@@ -112,7 +112,7 @@ The buffered duplicate-source profile identified redundant grammar validation, p
 
 The subsequent structural scanner retains the same trusted-valid contract but visits only JSON container punctuation, strings, and object keys. It preserves duplicate paths and byte offsets without re-walking scalar grammar. Release-to-release measurements found 19–24% lower public source-lint latency than 0.1.2 on large coordinate-, Feature-, and property-heavy fixtures, with unchanged peak RSS on the measured 1m-coordinate and 100k-Feature cases.
 
-No indexed-parser, semantic-scanner, rule-dispatch, diagnostic, or planner optimization was retained. Profiles showed their costs correspond to required work, and no additional small change met the evidence threshold.
+Indexed coordinate traversal now uses a direct low-allocation path when numeric lexemes are not required, while source-aware numeric-lexeme workloads retain the generic indexed traversal. The optimization preserves the existing indexed representation and semantic scanner.
 
 ## CLI bootstrap
 
