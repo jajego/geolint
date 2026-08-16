@@ -37,6 +37,17 @@ function point(coordinates: readonly number[]): JsonValue {
   return { type: 'Point', coordinates: [...coordinates] };
 }
 
+function nestedGeometryCollection(
+  depth: number,
+  terminal: JsonValue,
+): JsonValue {
+  let value = terminal;
+  for (let index = 0; index < depth; index += 1) {
+    value = { type: 'GeometryCollection', geometries: [value] };
+  }
+  return value;
+}
+
 test('jsonPointer implements RFC 6901 escaping without treating punctuation specially', () => {
   assert.equal(jsonPointer(), '');
   assert.equal(
@@ -463,6 +474,34 @@ test('nested GeometryCollections preserve coordinate array order and exact point
     '/geometries/1/geometries/0/coordinates',
     '/geometries/1/geometries/1/coordinates',
   ]);
+});
+
+test('GeometryCollection semantic traversal is stack-safe at pathological depth', () => {
+  const paths: string[] = [];
+  const listener = {
+    coordinate: ({ path }: CoordinateEvent) => paths.push(path),
+  };
+  const summary = scanGeoJSON(nestedGeometryCollection(20_000, point([1, 2])), {
+    filePath: '<test>',
+    listener,
+    requirements: createExecutionRequirements({
+      facts: ['geometryStats'],
+      listener,
+    }),
+  });
+  assert.equal(summary.geometryNodeTypes?.get('GeometryCollection'), 20_000);
+  assert.equal(paths.length, 1);
+  assert.equal(paths[0]?.split('/geometries/0').length, 20_001);
+  assert.ok(paths[0]?.endsWith('/coordinates'));
+
+  const diagnostics = new DiagnosticCollector('<test>');
+  scanGeoJSON(nestedGeometryCollection(10_000, point([1])), {
+    filePath: '<test>',
+    diagnostics,
+    requirements: createExecutionRequirements({ facts: ['geometryStats'] }),
+  });
+  assert.equal(diagnostics.diagnostics[0]?.code, 'geojson/invalid-position');
+  assert.ok(diagnostics.diagnostics[0]?.path?.endsWith('/coordinates'));
 });
 
 test('2D, 3D, 4D+ and mixed dimensions preserve every ordinate', () => {

@@ -56,13 +56,36 @@ interface MutableBounds {
 
 interface GeometryMetrics {
   type: GeoJSONGeometryType;
-  path: JsonPointer;
+  path: GeometryPath;
   vertices: number;
   ringCount: number;
   geometryNodeCount: number;
   dimensions: MutableDimensions;
   bounds?: MutableBounds;
   complete: boolean;
+}
+
+interface GeometryPathFrame {
+  readonly parent: GeometryPath;
+  readonly segment: string | number;
+}
+
+type GeometryPath = JsonPointer | GeometryPathFrame;
+
+interface GeometryFrame {
+  readonly kind: 'geometry';
+  readonly value: JsonValue;
+  readonly path: GeometryPath;
+  readonly parent?: GeometryCollectionFrame;
+}
+
+interface GeometryCollectionFrame {
+  readonly kind: 'collection';
+  readonly metrics: GeometryMetrics;
+  readonly geometries: Iterator<JsonValue>;
+  readonly geometriesPath: GeometryPath;
+  readonly parent?: GeometryCollectionFrame;
+  index: number;
 }
 
 interface MutablePropertyStats {
@@ -193,9 +216,31 @@ function ownMember(object: JsonObject, key: string): JsonValue | undefined {
   return Object.hasOwn(object, key) ? object[key] : undefined;
 }
 
+function appendGeometryPath(
+  path: GeometryPath,
+  segment: string | number,
+): GeometryPathFrame {
+  return { parent: path, segment };
+}
+
+function materializeGeometryPath(path: GeometryPath): JsonPointer {
+  if (typeof path === 'string') return path;
+  const segments: (string | number)[] = [];
+  let current: GeometryPath = path;
+  while (typeof current !== 'string') {
+    segments.push(current.segment);
+    current = current.parent;
+  }
+  let pointer = current;
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    pointer = appendPointer(pointer, segments[index]!);
+  }
+  return pointer;
+}
+
 function validateBbox(
   object: JsonObject,
-  path: JsonPointer,
+  path: GeometryPath,
   state: ScanState,
   featureIndex?: number,
 ): void {
@@ -211,7 +256,7 @@ function validateBbox(
       state,
       'geojson/invalid-bbox',
       'Expected bbox to contain an even number of at least four finite numbers.',
-      appendPointer(path, 'bbox'),
+      appendPointer(materializeGeometryPath(path), 'bbox'),
       featureIndex,
     );
   }
@@ -321,7 +366,7 @@ function geometrySummary(metrics: GeometryMetrics): GeometrySummary {
   const geographicExtent = extent(metrics.bounds);
   return {
     type: metrics.type,
-    path: metrics.path,
+    path: materializeGeometryPath(metrics.path),
     vertices: metrics.vertices,
     ringCount: metrics.ringCount,
     geometryNodeCount: metrics.geometryNodeCount,
@@ -701,64 +746,52 @@ function scanGeometry(
   featureIndex: number | undefined,
   state: ScanState,
 ): GeometryMetrics | undefined {
-  if (!isObject(value)) {
-    damage(
-      state,
-      'geometryStats',
-      'vertexCount',
-      'coordinateDimensionStats',
-      'derivedExtent',
-    );
-    report(
-      state,
-      'geojson/invalid-geometry',
-      'Expected a GeoJSON geometry object.',
-      path,
-      featureIndex,
-    );
-    return undefined;
-  }
-  const geometry = value;
-  const typeValue = ownMember(geometry, 'type');
-  if (typeof typeValue !== 'string' || !geometryTypes.has(typeValue)) {
-    damage(
-      state,
-      'geometryStats',
-      'vertexCount',
-      'coordinateDimensionStats',
-      'derivedExtent',
-    );
-    report(
-      state,
-      'geojson/invalid-geometry',
-      'Expected a supported GeoJSON geometry type.',
-      appendPointer(path, 'type'),
-      featureIndex,
-    );
-    return undefined;
-  }
-  const type = typeValue as GeoJSONGeometryType;
-  const metrics: GeometryMetrics = {
-    type,
-    path,
-    vertices: 0,
-    ringCount: 0,
-    geometryNodeCount: 1,
-    dimensions: emptyDimensions(),
-    complete: true,
+  let result: GeometryMetrics | undefined;
+  const work: (GeometryFrame | GeometryCollectionFrame)[] = [
+    { kind: 'geometry', value, path },
+  ];
+  const finish = (
+    metrics: GeometryMetrics | undefined,
+    parent: GeometryCollectionFrame | undefined,
+  ): void => {
+    if (!parent) {
+      result = metrics;
+      return;
+    }
+    if (!metrics) {
+      parent.metrics.complete = false;
+      return;
+    }
+    parent.metrics.vertices += metrics.vertices;
+    parent.metrics.ringCount += metrics.ringCount;
+    parent.metrics.geometryNodeCount += metrics.geometryNodeCount;
+    addDimensions(parent.metrics.dimensions, metrics.dimensions);
+    const mergedBounds = mergeBounds(parent.metrics.bounds, metrics.bounds);
+    if (mergedBounds) parent.metrics.bounds = mergedBounds;
+    if (!metrics.complete) parent.metrics.complete = false;
+    parent.index += 1;
   };
-  validateBbox(geometry, path, state, featureIndex);
 
-  if (state.requirements.geometryNodeCounts)
-    increment(state.geometryNodeTypes, type);
-  if (type === 'GeometryCollection') {
-    const geometriesPath = appendPointer(path, 'geometries');
-    const geometries = ownMember(geometry, 'geometries');
-    if (
-      !Array.isArray(geometries) &&
-      !isIndexedSequence(geometries, 'geometries')
-    ) {
-      metrics.complete = false;
+  // GeometryCollections can nest arbitrarily deeply, so do not use the JS call stack.
+  while (work.length > 0) {
+    const frame = work.pop()!;
+    if (frame.kind === 'collection') {
+      const next = frame.geometries.next();
+      if (next.done) {
+        finish(frame.metrics, frame.parent);
+        continue;
+      }
+      work.push(frame);
+      work.push({
+        kind: 'geometry',
+        value: next.value,
+        path: appendGeometryPath(frame.geometriesPath, frame.index),
+        parent: frame,
+      });
+      continue;
+    }
+
+    if (!isObject(frame.value)) {
       damage(
         state,
         'geometryStats',
@@ -769,42 +802,94 @@ function scanGeometry(
       report(
         state,
         'geojson/invalid-geometry',
-        'Expected GeometryCollection.geometries to be an array.',
-        geometriesPath,
+        'Expected a GeoJSON geometry object.',
+        materializeGeometryPath(frame.path),
         featureIndex,
       );
-      return metrics;
+      finish(undefined, frame.parent);
+      continue;
     }
-    const geometryValues = Array.isArray(geometries)
-      ? geometries
-      : indexedSequenceElements(geometries);
-    let index = 0;
-    for (const geometryValue of geometryValues) {
-      const child = scanGeometry(
-        geometryValue as JsonValue,
-        appendPointer(geometriesPath, index),
-        featureIndex,
+    const geometry = frame.value;
+    const typeValue = ownMember(geometry, 'type');
+    if (typeof typeValue !== 'string' || !geometryTypes.has(typeValue)) {
+      damage(
         state,
+        'geometryStats',
+        'vertexCount',
+        'coordinateDimensionStats',
+        'derivedExtent',
       );
-      if (!child) {
+      report(
+        state,
+        'geojson/invalid-geometry',
+        'Expected a supported GeoJSON geometry type.',
+        appendPointer(materializeGeometryPath(frame.path), 'type'),
+        featureIndex,
+      );
+      finish(undefined, frame.parent);
+      continue;
+    }
+    const type = typeValue as GeoJSONGeometryType;
+    const metrics: GeometryMetrics = {
+      type,
+      path: frame.path,
+      vertices: 0,
+      ringCount: 0,
+      geometryNodeCount: 1,
+      dimensions: emptyDimensions(),
+      complete: true,
+    };
+    validateBbox(geometry, frame.path, state, featureIndex);
+    if (state.requirements.geometryNodeCounts)
+      increment(state.geometryNodeTypes, type);
+
+    if (type === 'GeometryCollection') {
+      const geometriesPath = appendGeometryPath(frame.path, 'geometries');
+      const geometries = ownMember(geometry, 'geometries');
+      if (
+        !Array.isArray(geometries) &&
+        !isIndexedSequence(geometries, 'geometries')
+      ) {
         metrics.complete = false;
+        damage(
+          state,
+          'geometryStats',
+          'vertexCount',
+          'coordinateDimensionStats',
+          'derivedExtent',
+        );
+        report(
+          state,
+          'geojson/invalid-geometry',
+          'Expected GeometryCollection.geometries to be an array.',
+          materializeGeometryPath(geometriesPath),
+          featureIndex,
+        );
+        finish(metrics, frame.parent);
         continue;
       }
-      metrics.vertices += child.vertices;
-      metrics.ringCount += child.ringCount;
-      metrics.geometryNodeCount += child.geometryNodeCount;
-      addDimensions(metrics.dimensions, child.dimensions);
-      const mergedBounds = mergeBounds(metrics.bounds, child.bounds);
-      if (mergedBounds) metrics.bounds = mergedBounds;
-      if (!child.complete) metrics.complete = false;
-      index += 1;
+      work.push({
+        kind: 'collection',
+        metrics,
+        geometries: Array.isArray(geometries)
+          ? geometries.values()
+          : indexedSequenceElements(geometries),
+        geometriesPath,
+        ...(frame.parent ? { parent: frame.parent } : {}),
+        index: 0,
+      });
+      continue;
     }
-  } else {
-    const coordinatesPath = appendPointer(path, 'coordinates');
+
+    const coordinatesPath = appendPointer(
+      materializeGeometryPath(frame.path),
+      'coordinates',
+    );
     const coordinates = ownMember(geometry, 'coordinates');
     if (!isCoordinateArray(coordinates)) {
       invalidCoordinates(coordinatesPath, featureIndex, metrics, state);
-      return metrics;
+      finish(metrics, frame.parent);
+      continue;
     }
     scanCoordinateTree(
       type,
@@ -814,8 +899,9 @@ function scanGeometry(
       metrics,
       state,
     );
+    finish(metrics, frame.parent);
   }
-  return metrics;
+  return result;
 }
 
 function scanProperties(
