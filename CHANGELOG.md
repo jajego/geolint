@@ -13,6 +13,10 @@ GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stab
 - Escape control characters in human-readable diagnostic, path, filename, and snapshot output.
 - Harden human-readable rule identifiers against terminal controls and Unicode bidi formatting controls.
 
+### Changed
+
+- Improved target discovery for large, deep, wide, and overlapping file sets without changing discovery semantics.
+
 ## 0.1.1 - 2026-08-10
 
 ### Changed

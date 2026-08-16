@@ -106,6 +106,16 @@ The buffered duplicate-source profile identified redundant grammar validation, p
 
 No indexed-parser, semantic-scanner, rule-dispatch, diagnostic, or planner optimization was retained. Profiles showed their costs correspond to required work, and no additional small change met the evidence threshold.
 
+## Target discovery
+
+Target discovery retains `fast-glob`. The team evaluated Node's `fsPromises.glob()`, a custom `readdir`/Dirent walker, fast-glob post-processing, casing recovery, and physical identity resolution. On large sparse trees, fast-glob materially outperformed the Node-native alternatives.
+
+Profiling then identified GeoLint-owned repeated casing reads and serial `realpath()` calls as the remaining costs. Each `resolveTargets()` call now shares casing-directory reads and exact-input physical-path resolutions, then resolves distinct physical paths with a bounded concurrency of eight before reducing aliases deterministically. This preserves canonical casing and physical-identity semantics without any configuration change.
+
+On the reference Windows machine, the bounded physical-identity work reduced end-to-end target resolution by approximately 42% for a small set, 63% for medium, 54% for a 50k sparse tree, 60% for 10k matches, 52% for deep paths, 56% for a wide directory, and 54% for overlapping patterns. Casing-read memoization reduced 10k-match reads from 30,000 to about 52, deep-path reads from 7,500 to about 34, and wide-directory reads from 2,000 to 2. The performance curve generally plateaued around four to eight workers; 16 and 32 had inconsistent marginal gains with more filesystem pressure.
+
+Run `npm run benchmark:targets` for the focused warm target-discovery profile. Its per-pattern phase timings can overlap because configured patterns expand concurrently; treat the total wall time and operation counts as the comparable results.
+
 ## Caveats and policy
 
 Timing varies with CPU frequency, background work, Node/V8 version, operating system, and GC history. Compare artifacts from the same platform, architecture, Node major version, and CPU model; CPU-count and memory warnings provide additional runner context. Initial thresholds are advisory until CI variance is characterized. Correctness and instrumentation invariants remain hard failures.

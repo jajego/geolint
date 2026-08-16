@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { resolveTargets } from '../engine/targets.js';
+import {
+  resolveTargets,
+  type TargetResolutionProfile,
+} from '../engine/targets.js';
 import { matchesGlob } from '../config/glob.js';
 import { resolveConfig } from '../config/resolve.js';
 import { GeoLintTargetError } from '../engine/errors.js';
@@ -361,7 +364,7 @@ test('explicit directory symlinks are not recursively followed', async (t) => {
   }
 });
 
-test('file aliases collapse to one canonical display path', async () => {
+test('file aliases collapse to the lexically smallest display path', async () => {
   const root = await project();
   try {
     await mkdir(join(root, 'source'));
@@ -371,17 +374,70 @@ test('file aliases collapse to one canonical display path', async () => {
       join(root, 'alias'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
+    await symlink(
+      join(root, 'source'),
+      join(root, 'another-alias'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
-    const targets = await resolveTargets(
-      resolveConfig({}, root),
-      ['source/map.geojson', 'alias/map.geojson'],
+    for (const targetOrder of [
+      ['source/map.geojson', 'alias/map.geojson', 'another-alias/map.geojson'],
+      ['another-alias/map.geojson', 'source/map.geojson', 'alias/map.geojson'],
+    ]) {
+      const targets = await resolveTargets(
+        resolveConfig({}, root),
+        targetOrder,
+        root,
+      );
+
+      assert.deepEqual(
+        targets.map(({ filePath }) => filePath),
+        ['alias/map.geojson'],
+      );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('bounded physical identity resolution preserves serial descriptors', async () => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'data'));
+    await Promise.all(
+      Array.from({ length: 40 }, (_, index) =>
+        writeFile(join(root, 'data', `${index}.geojson`), '{}'),
+      ),
+    );
+    const config = resolveConfig(
+      {
+        files: ['data/**/*.geojson', 'data/*.geojson'],
+        overrides: [{ files: ['data/**'], rules: { scoped: 'error' } }],
+      },
       root,
     );
-
-    assert.deepEqual(
-      targets.map(({ filePath }) => filePath),
-      ['alias/map.geojson'],
+    const profile = (realpathConcurrency: number): TargetResolutionProfile => ({
+      realpathConcurrency,
+      record: () => undefined,
+      count: () => undefined,
+    });
+    const serial = await resolveTargets(
+      config,
+      undefined,
+      root,
+      false,
+      undefined,
+      profile(1),
     );
+    const concurrent = await resolveTargets(
+      config,
+      undefined,
+      root,
+      false,
+      undefined,
+      profile(8),
+    );
+    assert.deepEqual(concurrent, serial);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

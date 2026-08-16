@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assertGlob, matchesGlob } from '../config/glob.js';
+import { assertGlob, compileGlobMatcher, matchesGlob } from '../config/glob.js';
 import { GeoLintConfigError } from '../engine/errors.js';
 
 const validPatterns: readonly [string, string][] = [
@@ -71,4 +71,20 @@ test('glob matching normalizes separators without matching dot segments', () => 
     matchesGlob('.fixtures/a.geojson', ['.fixtures/**/*.geojson']),
     true,
   );
+});
+
+test('compiled glob matchers preserve V1 matching semantics', () => {
+  const compiled = compileGlobMatcher([
+    'public/**/*.geojson',
+    'fixtures/*.json',
+  ]);
+  for (const path of [
+    'public/map.geojson',
+    'fixtures/map.json',
+    'public/.hidden.geojson',
+  ])
+    assert.equal(
+      compiled(path),
+      matchesGlob(path, ['public/**/*.geojson', 'fixtures/*.json']),
+    );
 });

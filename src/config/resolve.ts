@@ -1,6 +1,6 @@
 import { relative, resolve } from 'node:path';
 
-import { matchesGlob, normalizePath } from './glob.js';
+import { compileGlobMatcher, matchesGlob, normalizePath } from './glob.js';
 import { mergeConfig, mergeOverride } from './merge.js';
 import { validateConfig } from './validate.js';
 import type {
@@ -74,4 +74,30 @@ export function resolveFileConfig(
     filePath,
     matchingOverrides: Object.freeze(matchingOverrides),
   });
+}
+
+export function compileFileConfigResolver(
+  config: ResolvedConfig,
+): (fileName: string) => ResolvedFileConfig {
+  const overrides = config.overrides.map((override) => ({
+    override,
+    matchesFiles: compileGlobMatcher(override.files),
+    matchesIgnores: compileGlobMatcher(override.ignores ?? []),
+  }));
+  return (fileName) => {
+    const filePath = normalizeFilePath(config.projectRoot, fileName);
+    let merged: GeoLintConfig = config;
+    const matchingOverrides: number[] = [];
+    overrides.forEach(({ override, matchesFiles, matchesIgnores }, index) => {
+      if (matchesFiles(filePath) && !matchesIgnores(filePath)) {
+        merged = mergeOverride(merged, override);
+        matchingOverrides.push(index);
+      }
+    });
+    return Object.freeze({
+      ...finalizeConfig(merged, config.projectRoot),
+      filePath,
+      matchingOverrides: Object.freeze(matchingOverrides),
+    });
+  };
 }

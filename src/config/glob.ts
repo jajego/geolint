@@ -74,7 +74,14 @@ export function matchesGlob(
   path: string,
   patterns: readonly string[],
 ): boolean {
-  return patterns.some((pattern) => {
+  return compileGlobMatcher(patterns)(path);
+}
+
+/** Validates V1 patterns once, then matches many normalized logical paths. */
+export function compileGlobMatcher(
+  patterns: readonly string[],
+): (path: string) => boolean {
+  const matchers = patterns.map((pattern) => {
     assertGlob(pattern);
     return picomatch(normalizePath(pattern), {
       bash: false,
@@ -84,6 +91,7 @@ export function matchesGlob(
       nonegate: true,
       noextglob: true,
       noglobstar: false,
-    })(normalizePath(path));
+    });
   });
+  return (path) => matchers.some((matcher) => matcher(normalizePath(path)));
 }
