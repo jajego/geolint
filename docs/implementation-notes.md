@@ -192,5 +192,6 @@ ordinary CI and separately through `npm run test:conformance`.
 Phase 7 found no semantic divergence requiring production changes. The V5
 stdin replay cases for memory replay, temp-file spooling, and cleanup on
 success, parse failure, plugin failure, and abort remain deferred with the
-underlying stdin/spooling feature. Pathological semantic GeometryCollection
-recursion also remains the previously documented robustness limit.
+underlying stdin/spooling feature. At the end of Phase 7, pathological semantic
+GeometryCollection recursion remained a documented robustness limit; 0.1.3
+later removed that limit with iterative semantic traversal.
