@@ -33,7 +33,10 @@ if (memoryIndex >= 0) {
     process.stdout.write(`${JSON.stringify(await runProfileCase(id))}\n`);
   } else {
     const extended = argv.includes('--extended');
-    const artifact = createArtifact(await runBenchmarks(extended), extended);
+    const artifact = createArtifact(
+      await runBenchmarks(extended),
+      extended ? 'extended' : 'standard',
+    );
     const outputIndex = argv.indexOf('--output');
     const outputPath = outputIndex < 0 ? undefined : argv[outputIndex + 1];
     if (outputIndex >= 0 && !outputPath) {

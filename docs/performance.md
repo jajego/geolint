@@ -9,10 +9,13 @@ npm run benchmark
 npm run benchmark:extended
 npm run benchmark:json
 npm run benchmark:cli
+npm run benchmark:large-memory
 npm run benchmark:compare -- baseline.json current.json 20
 ```
 
 The standard suite is the normal development and CI check. The extended suite adds dedicated child-process peak-RSS measurements. Either suite accepts `--output benchmark-results/name.json`; generated JSON artifacts are ignored by Git. CI writes the standard artifact and uploads it from the Ubuntu job.
+
+`npm run benchmark:large-memory` is opt-in and is not part of normal CI. It streams deterministic temporary fixtures: dense coordinate Lines at roughly 10, 50, and 100 MiB; roughly 50 MiB of many small Features; and a roughly 50 MiB large-property-string control. Buffered and production-indexed runs each use a fresh child process per sample, so max RSS is not contaminated by another strategy. The suite uses two 10 MiB samples and one sample for each larger case to keep the command practical; it cleans its temporary directory in a `finally` block. Expect roughly 260 MiB of temporary disk space and substantial RAM pressure for the dense buffered cases. Use `-- --output benchmark-results/large.json` to retain an artifact, then compare same-machine artifacts with `benchmark:compare`. Absolute timings and RSS are not comparable across different machines or Node majors.
 
 ## Source-aware policies
 

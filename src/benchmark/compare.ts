@@ -27,6 +27,12 @@ const optionalNumericMetrics = [
   'verticesPerSecond',
   'filesPerSecond',
   'peakRssBytes',
+  'finalRssBytes',
+  'heapUsedBytes',
+  'externalBytes',
+  'arrayBuffersBytes',
+  'requestedMiB',
+  'fileBytes',
 ] as const;
 
 function invalid(label: string, message: string): never {
@@ -150,6 +156,32 @@ function validateBenchmarkCase(
   validateSamples(item, caseLabel);
   for (const key of optionalNumericMetrics)
     validateOptionalNonNegativeFiniteNumber(item, key, caseLabel);
+  if (item.shape !== undefined) requiredString(item, 'shape', caseLabel);
+  if (
+    item.coordinateConsumer !== undefined &&
+    item.coordinateConsumer !== 'direct' &&
+    item.coordinateConsumer !== 'generic' &&
+    item.coordinateConsumer !== 'not-applicable'
+  )
+    invalid(caseLabel, 'invalid coordinateConsumer.');
+  if (item.memorySamples !== undefined) {
+    if (!Array.isArray(item.memorySamples))
+      invalid(caseLabel, 'invalid memorySamples.');
+    if (item.memorySamples.length !== item.sampleCount)
+      invalid(caseLabel, 'memorySamples must match sampleCount.');
+    for (const sample of item.memorySamples) {
+      const memory = record(sample);
+      if (!memory) invalid(caseLabel, 'invalid memory sample.');
+      for (const key of [
+        'peakRssBytes',
+        'finalRssBytes',
+        'heapUsedBytes',
+        'externalBytes',
+        'arrayBuffersBytes',
+      ] as const)
+        validateOptionalNonNegativeFiniteNumber(memory, key, caseLabel);
+    }
+  }
   if (
     item.workerCount !== undefined &&
     (typeof item.workerCount !== 'number' ||
@@ -178,7 +210,11 @@ export function validateArtifact(
   if (artifact.schemaVersion !== 1)
     invalid(label, 'unsupported or missing schemaVersion (expected 1).');
   requiredString(artifact, 'geolintVersion', label);
-  if (artifact.suite !== 'standard' && artifact.suite !== 'extended')
+  if (
+    artifact.suite !== 'standard' &&
+    artifact.suite !== 'extended' &&
+    artifact.suite !== 'large-memory'
+  )
     invalid(label, 'unsupported or missing suite.');
   validateEnvironment(artifact.environment, label);
   if (!Array.isArray(artifact.cases)) invalid(label, 'missing cases.');
@@ -233,6 +269,10 @@ function caseReasons(
     'profile',
     'strategy',
     'sourceBytes',
+    'shape',
+    'requestedMiB',
+    'fileBytes',
+    'coordinateConsumer',
   ] as const) {
     if (baseline[key] !== current[key]) reasons.push(`${key} differs`);
   }

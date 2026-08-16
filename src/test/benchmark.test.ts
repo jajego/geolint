@@ -133,6 +133,27 @@ test('benchmark artifact validation checks optional numeric metrics', () => {
   validateArtifact(valid);
 });
 
+test('large-memory artifacts retain isolated memory samples', () => {
+  const sample = {
+    peakRssBytes: 100,
+    finalRssBytes: 90,
+    heapUsedBytes: 80,
+    externalBytes: 7,
+    arrayBuffersBytes: 6,
+  };
+  validateArtifact({
+    ...artifact({
+      ...benchmark(100, 10, 100),
+      shape: 'dense-coordinates',
+      requestedMiB: 10,
+      fileBytes: 1,
+      coordinateConsumer: 'direct',
+      memorySamples: [sample],
+    }),
+    suite: 'large-memory',
+  });
+});
+
 test('benchmark artifact validation derives groups from benchmarkGroups', () => {
   for (const group of benchmarkGroups)
     validateArtifact(artifact({ ...benchmark(100, 10, 100), group }));

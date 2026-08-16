@@ -4,6 +4,7 @@
     "src/workers/worker-entry.ts",
     "src/benchmark/compare-cli.ts",
     "src/benchmark/cli-cold.ts",
+    "src/benchmark/large-memory.ts",
     "src/benchmark/targets-profile.ts",
     "src/benchmark/index.ts",
     "src/benchmark/worker-feasibility.ts",

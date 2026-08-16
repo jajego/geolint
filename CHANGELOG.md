@@ -2,6 +2,16 @@
 
 GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stable release, `0.x` changes may refine public contracts and are documented here.
 
+## Unreleased
+
+### Changed
+
+- Route eligible indexed GeoJSON coordinate traversal through the internal direct-coordinate consumer while preserving existing validation, duplicate-winner replay, and public APIs.
+
+### Internal
+
+- Add an opt-in `benchmark:large-memory` suite covering buffered and indexed large-file shapes with isolated child-process memory measurements and comparable benchmark artifacts.
+
 ## 0.1.5 - 2026-08-16
 
 ### Added

@@ -22,6 +22,14 @@ export interface BenchmarkEnvironment {
   readonly totalMemoryBytes: number;
 }
 
+export interface BenchmarkMemorySample {
+  readonly peakRssBytes: number;
+  readonly finalRssBytes: number;
+  readonly heapUsedBytes: number;
+  readonly externalBytes: number;
+  readonly arrayBuffersBytes: number;
+}
+
 export interface BenchmarkCaseResult {
   readonly id: string;
   readonly group: BenchmarkGroup;
@@ -40,6 +48,15 @@ export interface BenchmarkCaseResult {
   readonly verticesPerSecond?: number;
   readonly filesPerSecond?: number;
   readonly peakRssBytes?: number;
+  readonly finalRssBytes?: number;
+  readonly heapUsedBytes?: number;
+  readonly externalBytes?: number;
+  readonly arrayBuffersBytes?: number;
+  readonly memorySamples?: readonly BenchmarkMemorySample[];
+  readonly shape?: string;
+  readonly requestedMiB?: number;
+  readonly fileBytes?: number;
+  readonly coordinateConsumer?: 'direct' | 'generic' | 'not-applicable';
   readonly semanticCounts?: {
     readonly files?: number;
     readonly features?: number;
@@ -55,7 +72,7 @@ export interface BenchmarkCaseResult {
 export interface BenchmarkArtifact {
   readonly schemaVersion: 1;
   readonly geolintVersion: string;
-  readonly suite: 'standard' | 'extended';
+  readonly suite: 'standard' | 'extended' | 'large-memory';
   readonly environment: BenchmarkEnvironment;
   readonly cases: readonly BenchmarkCaseResult[];
 }

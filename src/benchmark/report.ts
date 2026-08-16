@@ -35,12 +35,12 @@ function benchmarkEnvironment(): BenchmarkEnvironment {
 
 export function createArtifact(
   cases: readonly BenchmarkCaseResult[],
-  extended: boolean,
+  suite: BenchmarkArtifact['suite'],
 ): BenchmarkArtifact {
   return {
     schemaVersion: 1,
     geolintVersion,
-    suite: extended ? 'extended' : 'standard',
+    suite,
     environment: benchmarkEnvironment(),
     cases,
   };
