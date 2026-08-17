@@ -4,6 +4,8 @@ GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stab
 
 ## Unreleased
 
+## 0.1.6 - 2026-08-16
+
 ### Changed
 
 - Route eligible indexed GeoJSON coordinate traversal through the internal direct-coordinate consumer while preserving existing validation, duplicate-winner replay, and public APIs.
