@@ -1,1 +1,16 @@
-{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"status":"retired"},"geometry":{"type":"Point","coordinates":[1.234,2]}},{"type":"Feature","id":"two","properties":{"status":"retired"},"geometry":{"type":"Point","coordinates":[3,4]}}]}
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "status": "retired" },
+      "geometry": { "type": "Point", "coordinates": [1.234, 2] }
+    },
+    {
+      "type": "Feature",
+      "id": "two",
+      "properties": { "status": "retired" },
+      "geometry": { "type": "Point", "coordinates": [3, 4] }
+    }
+  ]
+}

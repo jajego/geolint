@@ -39,7 +39,7 @@ npx geolint "public/**/*.geojson"
 
 ## Why GeoLint instead of a GeoJSON validator?
 
-There are tools such as [`@placemarkio/check-geojson`](https://github.com/placemark/check-geojson), which 
+There are tools such as [`@placemarkio/check-geojson`](https://github.com/placemark/check-geojson), which
 are useful when the main question is **“Is this valid GeoJSON?”**
 
 GeoLint is aimed at a different question: **“Is this GeoJSON artifact healthy enough to ship?”**

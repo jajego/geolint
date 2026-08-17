@@ -57,7 +57,10 @@ const uniquePropertyValue = defineRule({
     let duplicate: JsonPointer | undefined;
     return {
       propertyValue(property) {
-        if (property.key !== options.property || typeof property.value !== 'string') {
+        if (
+          property.key !== options.property ||
+          typeof property.value !== 'string'
+        ) {
           return;
         }
         if (seen.has(property.value)) {
@@ -88,7 +91,9 @@ const coordinatePrecision = defineRule({
       coordinateLexeme(coordinate) {
         const overPrecise = coordinate.rawValues.find((value) => {
           const decimal = value.indexOf('.');
-          return decimal !== -1 && value.length - decimal - 1 > options.decimals;
+          return (
+            decimal !== -1 && value.length - decimal - 1 > options.decimals
+          );
         });
         if (overPrecise !== undefined) {
           context.report({
