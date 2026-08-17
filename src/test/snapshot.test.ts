@@ -11,7 +11,10 @@ import {
   createBaseline,
   type BaselineFileEntry,
 } from '../regression/schema.js';
-import { snapshotBaseline } from '../regression/snapshot.js';
+import {
+  captureSnapshotFile,
+  snapshotBaseline,
+} from '../regression/snapshot.js';
 import type { GeoLintConfig } from '../types/config.js';
 import { definePlugin } from '../plugins/plugin.js';
 import { defineRule } from '../rules/define-rule.js';
@@ -279,6 +282,42 @@ test('snapshot schema is independent of ordinary and regression policy', async (
       first.baseline.files['map.geojson'],
       second.baseline.files['map.geojson'],
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('snapshot aggregate facts ignore equivalent reserialization except bytes', async () => {
+  const directory = await project();
+  try {
+    await writeFile(
+      join(directory, 'compact.geojson'),
+      '{"type":"FeatureCollection","features":[{"type":"Feature","id":"a","properties":{"a":1,"b":"x"},"geometry":{"type":"Point","coordinates":[1,2]}},{"type":"Feature","id":"b","properties":{"a":2,"b":"y"},"geometry":{"type":"Point","coordinates":[3,4]}}]}',
+    );
+    await writeFile(
+      join(directory, 'reserialized.geojson'),
+      `{
+  "features": [
+    { "geometry": { "coordinates": [3.0, 4e0], "type": "Point" }, "properties": { "b": "y", "a": 2.0 }, "id": "b", "type": "Feature" },
+    { "properties": { "b": "x", "a": 1e0 }, "type": "Feature", "geometry": { "type": "Point", "coordinates": [1.0, 2.0] }, "id": "a" }
+  ],
+  "type": "FeatureCollection"
+}`,
+    );
+
+    const compact = await captureSnapshotFile(
+      join(directory, 'compact.geojson'),
+      'compact.geojson',
+    );
+    const reserialized = await captureSnapshotFile(
+      join(directory, 'reserialized.geojson'),
+      'reserialized.geojson',
+    );
+    const { bytes: compactBytes, ...compactFacts } = compact;
+    const { bytes: reserializedBytes, ...reserializedFacts } = reserialized;
+
+    assert.notEqual(reserializedBytes, compactBytes);
+    assert.deepEqual(reserializedFacts, compactFacts);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -87,6 +87,8 @@ export default {
 
 Generated geospatial artifacts can change materially without a source-code diff making the impact obvious. A committed baseline lets CI compare the artifact itself: file and vertex growth, geometry distribution, property shape, ID quality, and other tracked facts.
 
+Baselines are semantic, not textual. A snapshot stores GeoLint's derived aggregate facts - not a copy, hash, or canonicalized form of the GeoJSON. Whitespace, object-key/property order, Feature order, and equivalent numeric spellings do not change those aggregate facts. The baseline also records byte length for the optional `fileSizeIncrease` threshold, so a reserialization that increases file size can intentionally be reported when that threshold is enabled. Source-sensitive rules remain separate; for example, coordinate precision can inspect the original numeric spelling.
+
 Regression baselines are artifact references, not suppression lists: they do **not** accept or hide rule, budget, or plugin diagnostics. Choose at least one regression threshold or check in configuration, then create and review a baseline:
 
 ```js
@@ -106,6 +108,8 @@ npx geolint snapshot
 git add .geolint-baseline.json
 npx geolint "public/**/*.geojson"
 ```
+
+`snapshot` writes derived facts rather than a copy or hash of the GeoJSON source; it also retains byte length for optional file-size regression.
 
 Quality, budgets, and regression work independently, but together they turn GeoJSON into a testable build artifact: quality catches inconsistency, budgets catch delivery cost, and baselines catch unexpected change over time.
 

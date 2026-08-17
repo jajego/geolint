@@ -4,6 +4,24 @@ Regression is optional. A baseline records objective artifact facts (bytes, coun
 
 `baseline` only chooses where the artifact reference is stored. It does not enable comparisons by itself; configure at least one threshold or check.
 
+## Baselines are semantic, not textual
+
+The baseline is not a source-file snapshot, file hash, or canonicalized GeoJSON document. GeoLint scans the GeoJSON and stores normalized, derived file facts: Feature and vertex counts, largest-Feature vertex count, geometry-type distribution, property presence and coarse types, ID summaries, null-geometry count, and byte length.
+
+The aggregate facts do not change when the same data is pretty-printed, object keys or properties are reordered, Features are reordered, or numeric values use equivalent JSON spellings such as `1`, `1.0`, and `1e0`. GeoLint does not rewrite or canonicalize the source to achieve this; it compares the facts it derives from the parsed artifact.
+
+Byte length is deliberately a separate stored fact. If `fileSizeIncrease` is enabled, a reserialization that makes the file larger can produce a regression signal - that is an intentional delivery-size check, not textual snapshot comparison. Likewise, source-sensitive lint rules are separate from baseline semantics: `coordinate-precision` can intentionally distinguish original coordinate lexemes such as `1`, `1.0`, and `1e0`.
+
+```text
+GeoJSON
+  ->
+semantic scan
+  ->
+derived facts
+  ->
+baseline
+```
+
 By default, a regression-governed file without an entry produces visible `no baseline exists` skips. After the first snapshot, mature CI can require explicit coverage with `requireBaseline: true`; then each governed file without an approved entry fails with `regression/missing-baseline`. Files with no enabled regression policy remain unaffected, including through overrides.
 
 ```js
@@ -33,6 +51,8 @@ Create and commit the reference:
 npx geolint snapshot
 git add .geolint-baseline.json
 ```
+
+`snapshot` writes these derived facts rather than a copy or hash of the GeoJSON source; byte length is retained for the optional file-size regression threshold.
 
 Then run the normal check in development and CI:
 
