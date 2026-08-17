@@ -37,6 +37,17 @@ npm install --save-dev @jajego/geolint
 npx geolint "public/**/*.geojson"
 ```
 
+## Why GeoLint instead of a GeoJSON validator?
+
+There are tools such as [`@placemarkio/check-geojson`](https://github.com/placemark/check-geojson), which 
+are useful when the main question is **“Is this valid GeoJSON?”**
+
+GeoLint is aimed at a different question: **“Is this GeoJSON artifact healthy enough to ship?”**
+
+In addition to structural and semantic checks, GeoLint can enforce project-specific quality rules, delivery budgets, and regression policies. That means it can catch problems such as rising vertex counts, property/type drift, missing IDs, or growth beyond an approved baseline even when the GeoJSON remains perfectly valid.
+
+Use a validator when you primarily need to accept or reject incoming GeoJSON. Use GeoLint when GeoJSON is a maintained or generated build artifact that you want to quality-gate in development and CI.
+
 ## Core concepts
 
 | Concern    | Question                                        | GeoLint capability |
