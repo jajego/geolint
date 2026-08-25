@@ -4,6 +4,11 @@ GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stab
 
 ## Unreleased
 
+### Changed
+
+- Improve target discovery by pruning safe configured ignores during traversal, avoiding redundant regular-file metadata work, collapsing overlapping configured targets earlier, and reducing the globbing dependency footprint by
+migrating from fast-glob to tinyglobby.
+
 ## 0.1.6 - 2026-08-16
 
 ### Changed

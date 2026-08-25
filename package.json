@@ -98,8 +98,8 @@
     "typescript-eslint": "^8.66.0"
   },
   "dependencies": {
-    "fast-glob": "^3.3.3",
     "jiti": "^2.7.0",
-    "picomatch": "^4.0.5"
+    "picomatch": "^4.0.5",
+    "tinyglobby": "^0.2.17"
   }
 }

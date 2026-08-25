@@ -15,6 +15,7 @@ const cases = [
   ['deep', 1000, 500],
   ['wide', 10000, 1000],
   ['overlap', 5000, 1000],
+  ['ignore-heavy', 6500, 6500],
 ] as const;
 for (const [name, total, matches] of cases) {
   const root = await mkdtemp(join(tmpdir(), 'geolint-profile-'));
@@ -29,6 +30,8 @@ for (const [name, total, matches] of cases) {
           `g${i % 20}`,
         );
       else if (name === 'wide') dir = join(root, 'data');
+      else if (name === 'ignore-heavy')
+        dir = join(root, 'data', i < 6000 ? 'ignored' : 'kept');
       return [
         dir,
         join(dir, `f${i}.${i < matches ? 'geojson' : 'txt'}`),
@@ -47,7 +50,13 @@ for (const [name, total, matches] of cases) {
       name === 'overlap'
         ? ['data/**/*.geojson', 'data/g*/**/*.geojson']
         : ['data/**/*.geojson'];
-    const config = resolveConfig({ files: patterns }, root);
+    const config = resolveConfig(
+      {
+        files: patterns,
+        ...(name === 'ignore-heavy' ? { ignores: ['data/ignored/**'] } : {}),
+      },
+      root,
+    );
     const results = [];
     for (const realpathConcurrency of [1, 2, 4, 8, 16, 32]) {
       const samples = [];

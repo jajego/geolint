@@ -120,13 +120,13 @@ The CLI entry parses arguments before loading the full command implementation. `
 
 ## Target discovery
 
-Target discovery retains `fast-glob`. The team evaluated Node's `fsPromises.glob()`, a custom `readdir`/Dirent walker, fast-glob post-processing, casing recovery, and physical identity resolution. On large sparse trees, fast-glob materially outperformed the Node-native alternatives.
+Target discovery uses an internal glob enumerator without changing GeoLint's target syntax or configuration. Configured patterns are enumerated together, safe project-root ignores are pruned during traversal, and identical logical paths collapse before policy and physical-identity work. Exact targets and stdin retain their dedicated lanes.
 
-Profiling then identified GeoLint-owned repeated casing reads and serial `realpath()` calls as the remaining costs. Each `resolveTargets()` call now shares casing-directory reads and exact-input physical-path resolutions, then resolves distinct physical paths with a bounded concurrency of eight before reducing aliases deterministically. This preserves canonical casing and physical-identity semantics without any configuration change.
+GeoLint still applies its authoritative ignore and override matching after enumeration. It preserves canonical casing conservatively, then resolves distinct physical paths with a bounded concurrency of eight before reducing aliases deterministically. File links retain their logical names; directory links are not traversed. No discovery configuration is exposed.
 
 On the reference Windows machine, the bounded physical-identity work reduced end-to-end target resolution by approximately 42% for a small set, 63% for medium, 54% for a 50k sparse tree, 60% for 10k matches, 52% for deep paths, 56% for a wide directory, and 54% for overlapping patterns. Casing-read memoization reduced 10k-match reads from 30,000 to about 52, deep-path reads from 7,500 to about 34, and wide-directory reads from 2,000 to 2. The performance curve generally plateaued around four to eight workers; 16 and 32 had inconsistent marginal gains with more filesystem pressure.
 
-Run `npm run benchmark:targets` for the focused warm target-discovery profile. Its per-pattern phase timings can overlap because configured patterns expand concurrently; treat the total wall time and operation counts as the comparable results.
+Run `npm run benchmark:targets` for the focused warm target-discovery profile, including overlap and ignore-heavy coverage. Treat total wall time and operation counts as the comparable results.
 
 ## Caveats and policy
 

@@ -1,6 +1,7 @@
+import { lstat as lstatCallback, stat as statCallback } from 'node:fs';
 import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
-import fg from 'fast-glob';
+import { glob, type FileSystemAdapter } from 'tinyglobby';
 
 import {
   assertGlob,
@@ -19,8 +20,8 @@ import type { Dirent } from 'node:fs';
 const REALPATH_CONCURRENCY = 8;
 
 interface TargetResolutionContext {
-  // These Promise caches exist for one resolveTargets() call. Casing reads
-  // share in-flight work between concurrent expansions.
+  // These Promise caches exist for one resolveTargets() call. Prefix checks
+  // and result-casing work share in-flight directory reads.
   readonly casingDirectoryReads: Map<string, Promise<Dirent[]>>;
   readonly physicalPathResolutions: Map<string, Promise<string>>;
 }
@@ -77,52 +78,150 @@ async function explicitPathKind(
   }
 }
 
-async function expand(
+function symlinkCompatibleFileSystem(): FileSystemAdapter {
+  return {
+    // tinyglobby resolves directory links by default. GeoLint deliberately does
+    // not traverse them, while file links retain their logical path.
+    realpath(
+      path: string,
+      callback: (error: Error | null, path: string) => void,
+    ) {
+      lstatCallback(path, (lstatError, entry) => {
+        if (lstatError) return callback(lstatError, path);
+        if (!entry.isSymbolicLink()) return callback(null, path);
+        statCallback(path, (statError, target) => {
+          if (statError) return callback(statError, path);
+          if (target.isDirectory())
+            return callback(
+              new Error('GeoLint does not traverse directory links.'),
+              path,
+            );
+          return callback(null, path);
+        });
+      });
+    },
+  } as FileSystemAdapter;
+}
+
+function isDynamicGlobSegment(segment: string): boolean {
+  return [...segment].some((character) => '*?[]{}'.includes(character));
+}
+
+/** Returns only ignores that exclude every descendant of a literal subtree. */
+function traversalSafeIgnores(ignores: readonly string[]): string[] {
+  return ignores.flatMap((ignore) => {
+    const segments = normalizePath(ignore).split('/');
+    if (
+      segments.length < 2 ||
+      segments.at(-1) !== '**' ||
+      segments
+        .slice(0, -1)
+        .some(
+          (segment) =>
+            segment === '' ||
+            segment === '.' ||
+            segment === '..' ||
+            isDynamicGlobSegment(segment),
+        )
+    )
+      return [];
+    return [normalizePath(ignore)];
+  });
+}
+
+/** Stops at the first dynamic segment; later segments are tinyglobby's job. */
+function staticGlobPrefix(pattern: string): string {
+  const segments: string[] = [];
+  for (const segment of normalizePath(pattern).split('/')) {
+    if (isDynamicGlobSegment(segment)) break;
+    segments.push(segment);
+  }
+  return segments.join('/');
+}
+
+async function exactStaticPrefixCase(
   pattern: string,
   cwd: string,
   context: TargetResolutionContext,
   profile?: TargetResolutionProfile,
+): Promise<boolean> {
+  const prefix = staticGlobPrefix(pattern);
+  if (!prefix) return true;
+  const path = resolve(cwd, prefix);
+  let current = resolve(cwd);
+  for (const segment of normalizePath(relative(cwd, path)).split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      current = resolve(current, '..');
+      continue;
+    }
+    try {
+      profile?.count('staticPrefixComponents');
+      let entriesPromise = context.casingDirectoryReads.get(current);
+      if (!entriesPromise) {
+        profile?.count('staticPrefixReaddir');
+        entriesPromise = readdir(current, { withFileTypes: true });
+        context.casingDirectoryReads.set(current, entriesPromise);
+      } else profile?.count('staticPrefixCacheHits');
+      if (!(await entriesPromise).some((entry) => entry.name === segment))
+        return false;
+      current = join(current, segment);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function expand(
+  patterns: readonly string[],
+  cwd: string,
+  context: TargetResolutionContext,
+  ignores: readonly string[] = [],
+  profile?: TargetResolutionProfile,
 ): Promise<string[]> {
-  assertGlob(pattern);
-  const normalizedPattern = normalizePath(pattern);
-  const matchesPattern = compileGlobMatcher([normalizedPattern]);
-  profile?.count('fastGlob');
-  const paths = await measured(profile, 'fastGlob', () =>
-    fg(normalizedPattern, {
+  const normalizedPatterns = patterns.map((pattern) => {
+    assertGlob(pattern);
+    return normalizePath(pattern);
+  });
+  const caseValidPatterns = (
+    await Promise.all(
+      normalizedPatterns.map(async (pattern) =>
+        (await exactStaticPrefixCase(pattern, cwd, context, profile))
+          ? pattern
+          : undefined,
+      ),
+    )
+  ).filter((pattern): pattern is string => pattern !== undefined);
+  if (caseValidPatterns.length === 0) return [];
+  profile?.count('tinyGlob');
+  const paths = await measured(profile, 'tinyGlob', () =>
+    glob(caseValidPatterns, {
       cwd,
       absolute: true,
-      onlyFiles: false,
+      onlyFiles: true,
       caseSensitiveMatch: true,
       braceExpansion: true,
       dot: false,
       extglob: false,
-      followSymbolicLinks: false,
+      expandDirectories: false,
+      followSymbolicLinks: true,
       globstar: true,
+      ignore: ignores.map(normalizePath),
+      fs: symlinkCompatibleFileSystem(),
     }),
   );
-  profile?.count('fastGlobCandidates', paths.length);
-  const metadataStartedAt = profile ? performance.now() : 0;
-  const files = (
-    await Promise.all(
-      paths.map(async (path) =>
-        (await explicitPathKind(path, profile)) === 'file' ? path : undefined,
-      ),
-    )
-  ).filter((path): path is string => path !== undefined);
-  if (profile)
-    profile.record('metadata', performance.now() - metadataStartedAt);
+  profile?.count('tinyGlobCandidates', paths.length);
   const casingStartedAt = profile ? performance.now() : 0;
   const logicalPaths = await Promise.all(
-    files.map((path) => canonicalLogicalPath(path, cwd, context, profile)),
+    paths.map((path) => canonicalLogicalPath(path, cwd, context, profile)),
   );
   if (profile) {
     const casingDuration = performance.now() - casingStartedAt;
     profile.record('casing', casingDuration);
     profile.record('casingReaddir', casingDuration);
   }
-  return logicalPaths.filter((path) =>
-    matchesPattern(normalizeFilePath(cwd, path)),
-  );
+  return logicalPaths;
 }
 
 /** Restores filesystem casing without resolving symlink targets. */
@@ -176,9 +275,11 @@ async function collectExplicit(
     const kind = await explicitPathKind(literal, profile);
     if (kind === 'file') files.push(literal);
     else if (kind === 'directory')
-      files.push(...(await expand('**/*.geojson', literal, context, profile)));
+      files.push(
+        ...(await expand(['**/*.geojson'], literal, context, [], profile)),
+      );
     else {
-      const matches = await expand(target, cwd, context, profile);
+      const matches = await expand([target], cwd, context, [], profile);
       if (matches.length === 0) {
         throw new GeoLintTargetError(
           `No files matched "${target}".`,
@@ -194,6 +295,7 @@ async function collectExplicit(
 async function collectConfigured(
   config: ResolvedConfig,
   context: TargetResolutionContext,
+  noIgnore: boolean,
   profile?: TargetResolutionProfile,
 ): Promise<string[]> {
   if (!config.files?.length) {
@@ -202,13 +304,26 @@ async function collectConfigured(
       'GEOLINT_NO_TARGETS',
     );
   }
-  const matches = (
-    await Promise.all(
-      config.files.map((pattern) =>
-        expand(pattern, config.projectRoot, context, profile),
-      ),
-    )
-  ).flat();
+  const authoritativeIgnores = noIgnore ? [] : (config.ignores ?? []);
+  const traversalIgnores = traversalSafeIgnores(authoritativeIgnores);
+  profile?.count('traversalPrunes', traversalIgnores.length);
+  let matches = await expand(
+    config.files,
+    config.projectRoot,
+    context,
+    traversalIgnores,
+    profile,
+  );
+  // Preserve the existing distinction between no configured matches and
+  // configured matches removed by top-level ignores.
+  if (matches.length === 0 && traversalIgnores.length)
+    matches = await expand(
+      config.files,
+      config.projectRoot,
+      context,
+      [],
+      profile,
+    );
   if (matches.length === 0) {
     throw new GeoLintTargetError(
       'No files matched config.files.',
@@ -247,7 +362,7 @@ export async function resolveTargets(
     explicit
       ? collectExplicit(targets!, resolve(cwd), context, profile)
       : {
-          files: await collectConfigured(config, context, profile),
+          files: await collectConfigured(config, context, noIgnore, profile),
           stdin: false,
         },
   );
@@ -258,6 +373,15 @@ export async function resolveTargets(
     );
   }
 
+  const logicalCandidates = new Map<
+    string,
+    { absolutePath: string; filePath: string }
+  >();
+  for (const absolutePath of collected.files) {
+    const filePath = normalizeFilePath(config.projectRoot, absolutePath);
+    logicalCandidates.set(filePath, { absolutePath, filePath });
+  }
+
   const byRealPath = new Map<
     string,
     { filePath: string; absolutePath: string }
@@ -266,9 +390,8 @@ export async function resolveTargets(
   let policyMatching = 0;
   let deduplication = 0;
   const physicalCandidates: { absolutePath: string; filePath: string }[] = [];
-  for (const absolutePath of collected.files) {
+  for (const { absolutePath, filePath } of logicalCandidates.values()) {
     const policyStartedAt = profile ? performance.now() : 0;
-    const filePath = normalizeFilePath(config.projectRoot, absolutePath);
     const ignored = !noIgnore && matchesIgnore(filePath);
     if (profile) policyMatching += performance.now() - policyStartedAt;
     if (ignored) continue;

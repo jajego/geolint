@@ -10,7 +10,7 @@ import {
 } from '../engine/targets.js';
 import { matchesGlob } from '../config/glob.js';
 import { resolveConfig } from '../config/resolve.js';
-import { GeoLintTargetError } from '../engine/errors.js';
+import { GeoLintConfigError, GeoLintTargetError } from '../engine/errors.js';
 
 async function project(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'geolint-targets-'));
@@ -170,6 +170,97 @@ test('config ignores filter explicit targets unless no-ignore is set', async () 
   }
 });
 
+test('configured ignores prune traversal but retain ignore error semantics', async () => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'kept'));
+    await mkdir(join(root, 'ignored'));
+    await mkdir(join(root, 'ignored', 'nested'));
+    await writeFile(join(root, 'kept', 'map.geojson'), '{}');
+    await writeFile(join(root, 'ignored', 'map.geojson'), '{}');
+    await writeFile(join(root, 'ignored', 'nested', 'map.geojson'), '{}');
+    const counts = new Map<string, number>();
+    const profile: TargetResolutionProfile = {
+      record: () => undefined,
+      count: (name, amount = 1) =>
+        counts.set(name, (counts.get(name) ?? 0) + amount),
+    };
+    const config = resolveConfig(
+      { files: ['**/*.geojson'], ignores: ['ignored/**'] },
+      root,
+    );
+
+    assert.deepEqual(
+      (
+        await resolveTargets(config, undefined, root, false, undefined, profile)
+      ).map(({ filePath }) => filePath),
+      ['kept/map.geojson'],
+    );
+    assert.equal(counts.get('traversalPrunes'), 1);
+    assert.equal(counts.get('tinyGlobCandidates'), 1);
+    assert.equal(counts.get('lstat'), undefined);
+    assert.deepEqual(
+      (await resolveTargets(config, undefined, root, true)).map(
+        ({ filePath }) => filePath,
+      ),
+      ['ignored/map.geojson', 'ignored/nested/map.geojson', 'kept/map.geojson'],
+    );
+    await assert.rejects(
+      resolveTargets(
+        resolveConfig(
+          { files: ['ignored/**/*.geojson'], ignores: ['ignored/**'] },
+          root,
+        ),
+        undefined,
+        root,
+      ),
+      (error) =>
+        error instanceof GeoLintTargetError &&
+        error.message === 'No files matched config.files after ignores.',
+    );
+    assert.deepEqual(
+      await resolveTargets(config, ['ignored/**/*.geojson'], root),
+      [],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('single-level configured ignores do not prune deeper files', async () => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'ignored', 'nested'), { recursive: true });
+    await writeFile(join(root, 'keep.geojson'), '{}');
+    await writeFile(join(root, 'ignored', 'top.geojson'), '{}');
+    await writeFile(join(root, 'ignored', 'nested', 'deep.geojson'), '{}');
+    const counts = new Map<string, number>();
+    const profile: TargetResolutionProfile = {
+      record: () => undefined,
+      count: (name, amount = 1) =>
+        counts.set(name, (counts.get(name) ?? 0) + amount),
+    };
+
+    const targets = await resolveTargets(
+      resolveConfig({ files: ['**/*.geojson'], ignores: ['ignored/*'] }, root),
+      undefined,
+      root,
+      false,
+      undefined,
+      profile,
+    );
+
+    assert.deepEqual(
+      targets.map(({ filePath }) => filePath),
+      ['ignored/nested/deep.geojson', 'keep.geojson'],
+    );
+    assert.equal(counts.get('traversalPrunes'), 0);
+    assert.equal(counts.get('tinyGlobCandidates'), 3);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('wildcards exclude dot segments and matching remains case-sensitive', async () => {
   const root = await project();
   try {
@@ -223,20 +314,35 @@ test('an explicitly dot-prefixed configured pattern includes dot segments', asyn
   }
 });
 
-test('filesystem expansion agrees with GeoLint matching for supported globs', async () => {
+test('tinyglobby discovery agrees with GeoLint V1 glob semantics', async () => {
   const root = await project();
   try {
     await mkdir(join(root, 'public', 'nested'), { recursive: true });
     await writeFile(join(root, 'public', 'a.geojson'), '{}');
     await writeFile(join(root, 'public', 'b.geojson'), '{}');
+    await writeFile(join(root, 'public', 'c.geojson'), '{}');
+    await writeFile(join(root, 'public', 'Case.geojson'), '{}');
+    await writeFile(join(root, 'public', '.hidden.geojson'), '{}');
     await writeFile(join(root, 'public', 'nested', 'a.geojson'), '{}');
     const candidates = [
       'public/a.geojson',
       'public/b.geojson',
+      'public/c.geojson',
+      'public/Case.geojson',
+      'public/.hidden.geojson',
       'public/nested/a.geojson',
     ];
 
-    for (const pattern of ['public/[ab].geojson', 'public/**/a.geojson']) {
+    for (const pattern of [
+      'public/*.geojson',
+      'public/**/a.geojson',
+      'public/**/nested/**/a.geojson',
+      'public/?.geojson',
+      'public/[ab].geojson',
+      'public/{a,b}.geojson',
+      'public\\*.geojson',
+      'public/.hidden.geojson',
+    ]) {
       const targets = await resolveTargets(
         resolveConfig({ files: [pattern] }, root),
         undefined,
@@ -244,11 +350,113 @@ test('filesystem expansion agrees with GeoLint matching for supported globs', as
       );
       assert.deepEqual(
         targets.map(({ filePath }) => filePath),
-        candidates.filter((candidate) => matchesGlob(candidate, [pattern])),
+        candidates
+          .filter((candidate) => matchesGlob(candidate, [pattern]))
+          .sort(),
       );
     }
+    await assert.rejects(
+      resolveTargets(
+        resolveConfig({ files: ['public/case.geojson'] }, root),
+        undefined,
+        root,
+      ),
+      (error) =>
+        error instanceof GeoLintTargetError &&
+        error.code === 'GEOLINT_NO_TARGETS',
+    );
+    for (const pattern of ['!public/*.geojson', 'public/+(a).geojson'])
+      assert.throws(
+        () => resolveConfig({ files: [pattern] }, root),
+        (error) =>
+          error instanceof GeoLintConfigError &&
+          error.code === 'GEOLINT_INVALID_GLOB',
+      );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('glob static prefixes must use exact filesystem casing', async () => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'Root', 'Public', 'Nested'), { recursive: true });
+    await writeFile(join(root, 'Root', 'Public', 'map.geojson'), '{}');
+    await writeFile(
+      join(root, 'Root', 'Public', 'Nested', 'other.geojson'),
+      '{}',
+    );
+    await writeFile(join(root, 'Root', 'Public', 'x.geojson'), '{}');
+    const resolve = async (pattern: string) =>
+      resolveTargets(
+        resolveConfig({ files: [pattern] }, root),
+        undefined,
+        root,
+      );
+
+    for (const pattern of [
+      'root/Public/*.geojson',
+      'Root/public/*.geojson',
+      'Root/Public/nested/*.geojson',
+    ])
+      await assert.rejects(
+        resolve(pattern),
+        (error) =>
+          error instanceof GeoLintTargetError &&
+          error.code === 'GEOLINT_NO_TARGETS',
+      );
+
+    assert.deepEqual(
+      (await resolve('Root/Public/*.geojson')).map(({ filePath }) => filePath),
+      ['Root/Public/map.geojson', 'Root/Public/x.geojson'],
+    );
+    assert.deepEqual(
+      (await resolve('Root/Public/Nested/*.geojson')).map(
+        ({ filePath }) => filePath,
+      ),
+      ['Root/Public/Nested/other.geojson'],
+    );
+    assert.deepEqual(
+      (await resolve('Root/Public/[m]ap.geojson')).map(
+        ({ filePath }) => filePath,
+      ),
+      ['Root/Public/map.geojson'],
+    );
+    assert.deepEqual(
+      (await resolve('Root/Public/?.geojson')).map(({ filePath }) => filePath),
+      ['Root/Public/x.geojson'],
+    );
+    await assert.rejects(
+      resolve('Root/Public/M*.geojson'),
+      (error) =>
+        error instanceof GeoLintTargetError &&
+        error.code === 'GEOLINT_NO_TARGETS',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('configured globs retain supported parent-root matching', async () => {
+  const parent = await project();
+  const root = join(parent, 'project');
+  try {
+    await mkdir(root);
+    await mkdir(join(parent, 'outside'));
+    await writeFile(join(parent, 'outside', 'map.geojson'), '{}');
+
+    const targets = await resolveTargets(
+      resolveConfig({ files: ['../outside/*.geojson'] }, root),
+      undefined,
+      root,
+    );
+
+    assert.deepEqual(
+      targets.map(({ filePath }) => filePath),
+      ['../outside/map.geojson'],
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
   }
 });
 
@@ -281,6 +489,81 @@ test('logical symlink paths remain eligible after physical identity lookup', asy
     assert.deepEqual(
       targets.map(({ filePath }) => filePath),
       ['public/current.geojson'],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('glob discovery preserves file links and does not traverse directory links', async (t) => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'source'));
+    await mkdir(join(root, 'links'));
+    await writeFile(join(root, 'source', 'map.geojson'), '{}');
+    await writeFile(join(root, 'source', 'plain.txt'), '{}');
+    try {
+      await symlink(
+        join(root, 'source', 'plain.txt'),
+        join(root, 'links', 'logical.geojson'),
+        'file',
+      );
+      await symlink(
+        join(root, 'source'),
+        join(root, 'links', 'directory'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+        t.skip('Creating file symlinks is not permitted on this host.');
+        return;
+      }
+      throw error;
+    }
+
+    const targets = await resolveTargets(
+      resolveConfig({ files: ['**/*.geojson'] }, root),
+      undefined,
+      root,
+    );
+
+    assert.deepEqual(
+      targets.map(({ filePath }) => filePath),
+      ['links/logical.geojson', 'source/map.geojson'],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('configured glob discovery does not traverse directory links', async (t) => {
+  const root = await project();
+  try {
+    await mkdir(join(root, 'source'));
+    await writeFile(join(root, 'source', 'map.geojson'), '{}');
+    try {
+      await symlink(
+        join(root, 'source'),
+        join(root, 'linked-directory'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+        t.skip('Creating directory links is not permitted on this host.');
+        return;
+      }
+      throw error;
+    }
+
+    const targets = await resolveTargets(
+      resolveConfig({ files: ['**/*.geojson'] }, root),
+      undefined,
+      root,
+    );
+
+    assert.deepEqual(
+      targets.map(({ filePath }) => filePath),
+      ['source/map.geojson'],
     );
   } finally {
     await rm(root, { recursive: true, force: true });
