@@ -14,22 +14,25 @@ import {
 } from '../regression/baseline-io.js';
 import { hasEnabledRegression } from '../regression/compare.js';
 import type { BaselineV1 } from '../regression/schema.js';
-import type { GeoLintRuntimeContext } from '../types/config.js';
+import type { GeoLintRuntimeContext, ResolvedConfig } from '../types/config.js';
 import type { FileLintResult, LintResult } from '../types/semantic.js';
 import { geolintVersion } from '../version.js';
 import { WorkerPool } from '../workers/pool.js';
 import { deserializeWorkerError } from '../workers/errors.js';
 import type {
   SerializedResolvedPolicy,
+  WorkerLintAdmission,
   WorkerLintTask,
   WorkerPluginReference,
 } from '../workers/protocol.js';
 import {
   lintResolvedBytes,
   lintResolvedFile,
+  selectFileParserStrategy,
   type ParserStrategy,
   type ResolvedSourceOptions,
 } from './lint-input.js';
+import { planPolicyRequirements } from './policy.js';
 import {
   GeoLintBatchError,
   GeoLintCapabilityError,
@@ -206,36 +209,69 @@ function debugWorkerDecision(
   debug?.(`worker reason: ${decision.reason}`);
 }
 
-function workerTasks(
+export interface WorkerLintTaskPlan {
+  readonly parser: ParserStrategy;
+  readonly admission: WorkerLintAdmission;
+}
+
+/** Static-only task planning. Legacy plugins retain parser:auto at runtime. */
+export function planWorkerLintTask(
+  config: ResolvedConfig,
+  parser: ParserStrategy,
+  sourceBytes: number,
+): WorkerLintTaskPlan {
+  if (parser === 'indexed') return { parser, admission: 'indexed' };
+  if (parser === 'buffered') return { parser, admission: 'buffered' };
+  const plan = planPolicyRequirements(config);
+  if (
+    selectFileParserStrategy(parser, plan.requirements, sourceBytes)
+      .strategy === 'indexed'
+  )
+    return { parser: 'indexed', admission: 'indexed' };
+  return plan.unknownPluginListeners
+    ? { parser: 'auto', admission: 'buffered-conservative-unknown' }
+    : { parser: 'buffered', admission: 'buffered' };
+}
+
+async function workerTasks(
   targets: readonly ResolvedTarget[],
   parser: ParserStrategy,
   baseline: BaselineV1 | undefined,
-): readonly WorkerLintTask[] {
-  return targets.map((target, taskId): WorkerLintTask => {
-    if (target.kind !== 'file')
-      throw new GeoLintInternalError(
-        'Stdin cannot be dispatched to a Worker.',
-        'GEOLINT_WORKER_STDIN',
-      );
-    const plugins = pluginReferences(target);
-    if (!plugins)
-      throw new GeoLintCapabilityError(
-        'Worker task contains a non-reloadable plugin.',
-        'GEOLINT_CAPABILITY_PLUGIN_NOT_RELOADABLE',
-      );
-    const options = sourceOptions(target, parser, baseline);
-    return {
-      protocolVersion: 1,
-      type: 'lint',
-      taskId,
-      absolutePath: target.absolutePath,
-      filePath: target.filePath,
-      policy: serializedPolicy(target),
-      plugins,
-      parser,
-      ...(options.baseline ? { baseline: options.baseline } : {}),
-    };
-  });
+): Promise<readonly WorkerLintTask[]> {
+  return Promise.all(
+    targets.map(async (target, taskId): Promise<WorkerLintTask> => {
+      if (target.kind !== 'file')
+        throw new GeoLintInternalError(
+          'Stdin cannot be dispatched to a Worker.',
+          'GEOLINT_WORKER_STDIN',
+        );
+      const plugins = pluginReferences(target);
+      if (!plugins)
+        throw new GeoLintCapabilityError(
+          'Worker task contains a non-reloadable plugin.',
+          'GEOLINT_CAPABILITY_PLUGIN_NOT_RELOADABLE',
+        );
+      // A failed stat still reaches the worker and becomes the usual per-file IO error.
+      const sourceBytes = await stat(target.absolutePath)
+        .then((entry) => entry.size)
+        .catch(() => 0);
+      const taskPlan = planWorkerLintTask(target.config, parser, sourceBytes);
+      const options = sourceOptions(target, taskPlan.parser, baseline);
+      return {
+        protocolVersion: 1,
+        type: 'lint',
+        taskId,
+        absolutePath: target.absolutePath,
+        filePath: target.filePath,
+        policy: serializedPolicy(target),
+        plugins,
+        parser: taskPlan.parser,
+        sourceBytes,
+        admission: taskPlan.admission,
+        ...(options.baseline ? { baseline: options.baseline } : {}),
+      };
+    }),
+  );
 }
 
 function cloneable(tasks: readonly WorkerLintTask[]): boolean {
@@ -317,7 +353,7 @@ export async function executeLintFiles(
   const errors: GeoLintError[] = [];
   let decision = await workerDecision(targets, options.workers);
   if (decision.count > 1) {
-    const tasks = workerTasks(targets, parser, baseline);
+    const tasks = await workerTasks(targets, parser, baseline);
     if (!cloneable(tasks)) {
       if (options.workers && options.workers > 1)
         throw new GeoLintCapabilityError(

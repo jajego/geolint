@@ -1,5 +1,8 @@
 import { builtInRules } from '../rules/builtins.js';
-import { compileRegression } from '../regression/compare.js';
+import {
+  compileRegression,
+  planRegressionRequirements,
+} from '../regression/compare.js';
 import type { BaselineFileEntry } from '../regression/schema.js';
 import { appendPointer } from '../scanner/json-pointer.js';
 import type {
@@ -26,6 +29,7 @@ import type {
   FeatureSummary,
   FileSummary,
   SkippedPolicy,
+  RuleEventName,
   SummaryFactName,
 } from '../types/semantic.js';
 import type { DiagnosticCollector } from './diagnostics.js';
@@ -36,7 +40,9 @@ import {
   GeoLintPluginError,
 } from './errors.js';
 import {
+  createExecutionRequirements,
   skipPolicyForIncompleteFacts,
+  type ExecutionRequirements,
   type SemanticListener,
 } from './requirements.js';
 
@@ -48,6 +54,7 @@ interface ErasedRule {
     readonly name: string;
     readonly schema: RuleOptionsSchema<unknown> | null;
     readonly requires?: readonly SummaryFactName[];
+    readonly listensTo?: readonly RuleEventName[];
   };
   readonly create: (
     context: RuleContext,
@@ -80,6 +87,11 @@ export interface CompiledPolicy {
   readonly featureByteSpans: boolean;
   readonly coordinateLexemeObservation?: CoordinateLexemeObservation;
   finish(summary: FileSummary): readonly SkippedPolicy[];
+}
+
+export interface PolicyRequirementsPlan {
+  readonly requirements: ExecutionRequirements;
+  readonly unknownPluginListeners: boolean;
 }
 
 const builtInRegistry = Object.freeze(
@@ -169,6 +181,7 @@ function pluginListener(
   ruleId: string,
   filePath: string,
   requires: readonly SummaryFactName[],
+  listensTo: readonly RuleEventName[] | undefined,
 ): RuleListener<readonly SummaryFactName[]> {
   if (
     value === null ||
@@ -210,6 +223,15 @@ function pluginListener(
         ruleId,
         filePath,
         new TypeError(`Listener hook "${hook}" must be a function.`),
+      );
+    }
+    if (hook !== 'document' && listensTo && !listensTo.includes(hook)) {
+      throw pluginFailure(
+        ruleId,
+        filePath,
+        new TypeError(
+          `Returned undeclared listener hook "${hook}"; add "${hook}" to meta.listensTo.`,
+        ),
       );
     }
     const callback = descriptor.value as (event: unknown) => unknown;
@@ -344,6 +366,61 @@ function settingParts(setting: Exclude<RuleSetting, 'off'>): {
       };
 }
 
+/** Derives scanner needs without invoking rules, schemas, or plugin callbacks. */
+export function planPolicyRequirements(
+  config: ResolvedConfig,
+): PolicyRequirementsPlan {
+  const facts = new Set<SummaryFactName>(['featureCount', 'vertexCount']);
+  const events = new Set<RuleEventName>();
+  let unknownPluginListeners = false;
+  const registry = effectiveRegistry(config.plugins);
+  const knownRules = new Set(registry.map(({ id }) => id));
+  for (const [name, setting] of Object.entries(config.rules)) {
+    if (setting !== 'off' && !knownRules.has(name)) {
+      throw new GeoLintConfigError(
+        `Unknown enabled rule "${name}".`,
+        'GEOLINT_UNKNOWN_RULE',
+      );
+    }
+  }
+  for (const { id, rule, plugin } of registry) {
+    const setting = config.rules[id];
+    if (!setting || setting === 'off') continue;
+    for (const fact of rule.meta.requires ?? []) facts.add(fact);
+    if (rule.meta.listensTo) {
+      for (const event of rule.meta.listensTo) events.add(event);
+    } else if (plugin) {
+      unknownPluginListeners = true;
+    }
+  }
+  const budgets = config.budgets;
+  if (budgets.featureCount !== undefined && budgets.featureCount !== false)
+    facts.add('featureCount');
+  if (budgets.totalVertices !== undefined && budgets.totalVertices !== false)
+    facts.add('vertexCount');
+  const featureBudgets =
+    budgets.feature === false ? undefined : budgets.feature;
+  if (
+    featureBudgets?.vertices !== undefined &&
+    featureBudgets.vertices !== false
+  )
+    events.add('feature');
+  const regression = planRegressionRequirements(config.regression);
+  for (const fact of regression.facts) facts.add(fact);
+  return {
+    requirements: createExecutionRequirements({
+      facts: [...facts],
+      events: [...events],
+      exactFileBytes:
+        (budgets.fileSize !== undefined && budgets.fileSize !== false) ||
+        regression.exactFileBytes,
+      featureByteSpans:
+        featureBudgets?.bytes !== undefined && featureBudgets.bytes !== false,
+    }),
+    unknownPluginListeners,
+  };
+}
+
 function compileRules(
   plugins: ResolvedConfig['plugins'],
   rules: ResolvedConfig['rules'],
@@ -398,7 +475,13 @@ function compileRules(
       } catch (error) {
         throw pluginFailure(ruleId, filePath, error);
       }
-      instance = pluginListener(created, ruleId, filePath, requires);
+      instance = pluginListener(
+        created,
+        ruleId,
+        filePath,
+        requires,
+        rule.meta.listensTo,
+      );
     } else {
       instance = rule.create(ruleContext, options);
       validateRuleListener(ruleId, requires, instance);

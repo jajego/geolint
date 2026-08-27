@@ -14,7 +14,7 @@ const geometryTypes = [
 ] as const satisfies readonly GeoJSONGeometryType[];
 
 const requireFeatureId = defineRule({
-  meta: { name: 'require-feature-id', schema: null },
+  meta: { name: 'require-feature-id', schema: null, listensTo: ['feature'] },
   create(context) {
     return {
       feature(feature) {
@@ -31,7 +31,12 @@ const requireFeatureId = defineRule({
 });
 
 const uniqueFeatureId = defineRule({
-  meta: { name: 'unique-feature-id', schema: null, recommended: true },
+  meta: {
+    name: 'unique-feature-id',
+    schema: null,
+    listensTo: ['feature'],
+    recommended: true,
+  },
   create(context) {
     const strings = new Set<string>();
     const numbers = new Set<number>();
@@ -188,6 +193,7 @@ const allowedGeometryTypes = defineRule({
         'a non-empty array',
       ),
     }),
+    listensTo: ['geometry'],
   },
   create(context, options) {
     const allowed = new Set(options.allow);
@@ -229,7 +235,7 @@ const consistentGeometryTypes = defineRule({
 });
 
 const noNullGeometry = defineRule({
-  meta: { name: 'no-null-geometry', schema: null },
+  meta: { name: 'no-null-geometry', schema: null, listensTo: ['feature'] },
   create(context) {
     return {
       feature(feature) {
@@ -247,7 +253,12 @@ const noNullGeometry = defineRule({
 });
 
 const validCoordinateRange = defineRule({
-  meta: { name: 'valid-coordinate-range', schema: null, recommended: true },
+  meta: {
+    name: 'valid-coordinate-range',
+    schema: null,
+    listensTo: ['coordinate'],
+    recommended: true,
+  },
   create(context) {
     return {
       coordinate(coordinate) {
@@ -313,6 +324,7 @@ const coordinatePrecision = defineRule({
         6,
       ),
     }),
+    listensTo: ['coordinateLexeme'],
   },
   create() {
     return {

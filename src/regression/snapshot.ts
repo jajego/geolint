@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { constants as bufferConstants } from 'node:buffer';
+import { readFile, stat } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -13,6 +14,11 @@ import {
 import { createExecutionRequirements } from '../engine/requirements.js';
 import { decodeSource } from '../input/decode-source.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
+import {
+  JsonSourceEncodingError,
+  JsonSourceSyntaxError,
+  parseIndexedFileSource,
+} from '../parser/indexed-source.js';
 import { scanGeoJSON } from '../scanner/scan.js';
 import type { ConfigRuntimeOptions } from '../config/runtime.js';
 import type {
@@ -147,6 +153,52 @@ export async function captureSnapshotFile(
   absolutePath: string,
   filePath: string,
 ): Promise<BaselineFileEntry> {
+  const requirements = createExecutionRequirements({
+    facts: snapshotFacts,
+    exactFileBytes: true,
+  });
+  let sourceBytes: number;
+  try {
+    sourceBytes = (await stat(absolutePath)).size;
+  } catch (error) {
+    throw new GeoLintIOError(
+      `Could not read snapshot target ${absolutePath}.`,
+      'GEOLINT_SNAPSHOT_READ_FAILED',
+      { cause: error },
+    );
+  }
+  if (sourceBytes > bufferConstants.MAX_STRING_LENGTH) {
+    let parsed;
+    try {
+      parsed = parseIndexedFileSource(absolutePath, requirements);
+    } catch (error) {
+      if (error instanceof JsonSourceEncodingError)
+        throw new GeoLintInputError(
+          `Cannot snapshot ${filePath}: input is not valid UTF-8.`,
+          'GEOLINT_SNAPSHOT_INVALID_ENCODING',
+          { cause: error },
+        );
+      if (error instanceof JsonSourceSyntaxError)
+        throw new GeoLintInputError(
+          `Cannot snapshot ${filePath}: input is not valid JSON.`,
+          'GEOLINT_SNAPSHOT_INVALID_JSON',
+          { cause: error },
+        );
+      throw error;
+    }
+    try {
+      return baselineEntryFromSummary(
+        scanGeoJSON(parsed.value, {
+          filePath,
+          sourceBytes: parsed.sourceBytes,
+          diagnostics: new DiagnosticCollector(filePath),
+          requirements,
+        }),
+      );
+    } finally {
+      parsed.close();
+    }
+  }
   let source: Buffer;
   try {
     source = await readFile(absolutePath);
@@ -161,6 +213,12 @@ export async function captureSnapshotFile(
   try {
     text = decodeSource(source);
   } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !('code' in error) ||
+      error.code !== 'ERR_ENCODING_INVALID_ENCODED_DATA'
+    )
+      throw error;
     throw new GeoLintInputError(
       `Cannot snapshot ${filePath}: input is not valid UTF-8.`,
       'GEOLINT_SNAPSHOT_INVALID_ENCODING',

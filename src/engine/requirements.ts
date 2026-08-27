@@ -7,6 +7,7 @@ import type {
   GeometrySummary,
   PropertyEvent,
   PropertyValueEvent,
+  RuleEventName,
   SkippedPolicy,
   SummaryFactName,
 } from '../types/semantic.js';
@@ -47,6 +48,7 @@ export interface ExecutionRequirements {
 export interface RequirementOptions {
   readonly facts?: readonly SummaryFactName[];
   readonly listener?: SemanticListener;
+  readonly events?: readonly RuleEventName[];
   readonly exactFileBytes?: boolean;
   readonly numericLexemes?: boolean;
   readonly featureByteSpans?: boolean;
@@ -57,28 +59,28 @@ export function createExecutionRequirements(
 ): ExecutionRequirements {
   const facts = new Set(options.facts);
   const listener = options.listener;
-  const geometrySummaries = Boolean(listener?.geometry || listener?.feature);
+  const events = new Set(options.events);
+  const has = (event: RuleEventName): boolean =>
+    events.has(event) || Boolean(listener?.[event]);
+  const geometrySummaries = has('geometry') || has('feature');
   const propertyStats = facts.has('propertyStats');
   const geometryStats = facts.has('geometryStats');
   const idStats = facts.has('idStats');
   const vertexCounts = facts.has('vertexCount');
   const coordinateDimensions = facts.has('coordinateDimensionStats');
   const geographicExtents = facts.has('derivedExtent');
-  const numericLexemes =
-    options.numericLexemes ?? Boolean(listener?.coordinateLexeme);
+  const numericLexemes = options.numericLexemes ?? has('coordinateLexeme');
 
   return Object.freeze({
     geometrySummaries,
     featureCount:
       facts.has('featureCount') || propertyStats || geometryStats || idStats,
-    featureIds: idStats || Boolean(listener?.feature),
-    propertyNames:
-      propertyStats || Boolean(listener?.property || listener?.propertyValue),
-    propertyTypes:
-      propertyStats || Boolean(listener?.property || listener?.propertyValue),
-    propertyValues: Boolean(listener?.propertyValue),
+    featureIds: idStats || has('feature'),
+    propertyNames: propertyStats || has('property') || has('propertyValue'),
+    propertyTypes: propertyStats || has('property') || has('propertyValue'),
+    propertyValues: has('propertyValue'),
     positions:
-      Boolean(listener?.coordinate) ||
+      has('coordinate') ||
       numericLexemes ||
       vertexCounts ||
       coordinateDimensions ||

@@ -74,6 +74,7 @@ export type {
   PropertyEvent,
   PropertyStats,
   PropertyValueEvent,
+  RuleEventName,
   SkippedPolicy,
   SummaryFactName,
   SuppressionSummary,

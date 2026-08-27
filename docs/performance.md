@@ -15,11 +15,17 @@ npm run benchmark:compare -- baseline.json current.json 20
 
 The standard suite is the normal development and CI check. The extended suite adds dedicated child-process peak-RSS measurements. Either suite accepts `--output benchmark-results/name.json`; generated JSON artifacts are ignored by Git. CI writes the standard artifact and uploads it from the Ubuntu job.
 
-`npm run benchmark:large-memory` is opt-in and is not part of normal CI. It streams deterministic temporary fixtures: dense coordinate Lines at roughly 10, 50, and 100 MiB; roughly 50 MiB of many small Features; and a roughly 50 MiB large-property-string control. Buffered and production-indexed runs each use a fresh child process per sample, so max RSS is not contaminated by another strategy. The suite uses two 10 MiB samples and one sample for each larger case to keep the command practical; it cleans its temporary directory in a `finally` block. Expect roughly 260 MiB of temporary disk space and substantial RAM pressure for the dense buffered cases. Use `-- --output benchmark-results/large.json` to retain an artifact, then compare same-machine artifacts with `benchmark:compare`. Absolute timings and RSS are not comparable across different machines or Node majors.
+`npm run benchmark:large-memory` is opt-in and is not part of normal CI. It streams deterministic temporary fixtures: dense coordinate Lines at roughly 10, 50, and 100 MiB; roughly 50 MiB of many small Features; and a roughly 50 MiB large-property-string control. Buffered and production-indexed runs each use a fresh child process per sample, so max RSS is not contaminated by another strategy. Indexed file parsing retains one fixed byte window and re-reads winning spans as needed; it does not retain the complete source buffer. The suite uses two 10 MiB samples and one sample for each larger case to keep the command practical; it cleans its temporary directory in a `finally` block. Expect roughly 260 MiB of temporary disk space and substantial RAM pressure for the dense buffered cases. Use `-- --output benchmark-results/large.json` to retain an artifact, then compare same-machine artifacts with `benchmark:compare`. Absolute timings and RSS are not comparable across different machines or Node majors.
 
-## Source-aware policies
+## Execution strategies
 
-Ordinary semantic policies use the cheaper buffered strategy. Policies that need exact source facts, such as coordinate numeric lexemes for `coordinate-precision`, use source-aware indexed analysis and can be materially slower on large coordinate-heavy files. GeoLint selects the cheapest correct strategy automatically.
+`auto` is the default and recommended file strategy. It keeps ordinary files below the internal 50 MiB policy threshold on the faster buffered path, and selects indexed execution for larger files, source-aware requirements such as coordinate numeric lexemes, or conservative JavaScript string-representation safety. The threshold limits buffered amplification observed on large and dense inputs; it is not a universal physical safety limit.
+
+Buffered execution decodes the file into a JavaScript string, uses `JSON.parse`, scans duplicate keys, and performs semantic traversal. It is generally the fastest path for ordinary files, but the source string and parsed object graph can produce high memory amplification on large or dense input.
+
+Indexed file execution reads through a bounded byte window and re-reads winning spans as needed instead of retaining the complete source buffer or source string. Its file-source representation is more memory-stable but generally slower, and semantic state still depends on the document and enabled policy; this is not a constant-memory guarantee. An individual JSON value requested by a rule may still exceed JavaScript string capacity, in which case GeoLint reports `parse/source-too-large`.
+
+For eligible parallel batches, GeoLint limits the aggregate source bytes admitted to buffered workers and refreshes workers after sufficiently large buffered tasks. These controls reduce simultaneous buffered amplification and retained worker heap between tasks; they do not promise a fixed RSS ceiling or immediate memory reclamation.
 
 ## Methodology
 
@@ -86,7 +92,7 @@ Measurements below were collected on Node v26.5.1, Windows x64, an Intel i9-9900
 | regression batch, 10 medium files             |    38.3 ms |
 | regression batch, 100 small files             |    75.6 ms |
 
-Buffered versus indexed semantic-only medians were 3.4/16.6 ms at 10k, 23.4/111.8 ms at 100k, and 281.8/1,085.8 ms at 1m. There is no measured crossover. The automatic strategy remains: buffered `JSON.parse` for semantic-only work and indexed execution only when exact source capabilities require it.
+Buffered versus indexed semantic-only medians were 3.4/16.6 ms at 10k, 23.4/111.8 ms at 100k, and 281.8/1,085.8 ms at 1m. There is no measured crossover for the faster semantic-only path; automatic file selection retains buffered `JSON.parse` below the large-file threshold unless exact source capabilities require indexed execution.
 
 At 100k points, buffered detail measured 24.6 ms total: 5.9 ms in `JSON.parse`, 8.5 ms in the duplicate-key source scan (`duplicateKeyScanMs`), and 10.3 ms in semantic scanning. The object-heavy 100k-Feature detail case measured 228.3 ms total: 62.6 ms parsing, 112.3 ms duplicate scanning, and 52.6 ms semantic scanning. Indexed attribution at 100k points was 25.6 ms syntax validation, 15.9 ms initial index replay, and 87.7 ms semantic/lazy replay. Source precision performs required numeric-token decoding and decimal analysis, so its 145.8 ms versus recommended's 21.8 ms is not described as parser-only overhead.
 
@@ -120,56 +126,20 @@ The CLI entry parses arguments before loading the full command implementation. `
 
 ## Target discovery
 
-Target discovery uses an internal glob enumerator without changing GeoLint's target syntax or configuration. Configured patterns are enumerated together, safe project-root ignores are pruned during traversal, and identical logical paths collapse before policy and physical-identity work. Exact targets and stdin retain their dedicated lanes.
+Target discovery uses tinyglobby behind GeoLint's existing target contract. Configured patterns are enumerated together, safe project-root ignores prune traversal, and identical logical paths collapse before policy and physical-identity work. GeoLint then applies authoritative ignore and override matching, validates path casing, resolves physical identities with bounded concurrency, reduces aliases deterministically, and returns sorted targets. File links retain their logical names; directory links are not traversed.
 
-GeoLint still applies its authoritative ignore and override matching after enumeration. It preserves canonical casing conservatively, then resolves distinct physical paths with a bounded concurrency of eight before reducing aliases deterministically. File links retain their logical names; directory links are not traversed. No discovery configuration is exposed.
-
-On the reference Windows machine, the bounded physical-identity work reduced end-to-end target resolution by approximately 42% for a small set, 63% for medium, 54% for a 50k sparse tree, 60% for 10k matches, 52% for deep paths, 56% for a wide directory, and 54% for overlapping patterns. Casing-read memoization reduced 10k-match reads from 30,000 to about 52, deep-path reads from 7,500 to about 34, and wide-directory reads from 2,000 to 2. The performance curve generally plateaued around four to eight workers; 16 and 32 had inconsistent marginal gains with more filesystem pressure.
-
-Run `npm run benchmark:targets` for the focused warm target-discovery profile, including overlap and ignore-heavy coverage. Treat total wall time and operation counts as the comparable results.
+Run `npm run benchmark:targets` for the focused warm target-discovery profile, including overlap and ignore-heavy coverage. Treat total wall time and operation counts as advisory, same-machine results.
 
 ## Caveats and policy
 
 Timing varies with CPU frequency, background work, Node/V8 version, operating system, and GC history. Compare artifacts from the same platform, architecture, Node major version, and CPU model; CPU-count and memory warnings provide additional runner context. Initial thresholds are advisory until CI variance is characterized. Correctness and instrumentation invariants remain hard failures.
 
-Cross-process caches, stdin spooling, parser rewrites, and hard timing gates are not part of the current package.
+Cross-process caches, stdin spooling, and hard timing gates are not part of the current package.
 
 ## Worker parallelism
 
-Worker measurements use a persistent `node:worker_threads` pool with one file per task. The main thread resolves configuration, per-file overrides, target identity, and regression baseline entries; workers receive file paths and pure data, read files themselves, and execute built-in rules. Each isolated result uses one untimed warmup followed by three or five measured invocations including pool startup and termination. Worker-ready, first-task, steady execution, total wall time, and process RSS are recorded separately.
+The production pool uses persistent `node:worker_threads` workers with one file per task. The main thread resolves configuration, per-file overrides, target identity, regression baseline entries, parser requirements, and buffered admission; workers receive file paths and pure data, then read and lint files. Work is parallelized across files, so one huge file does not benefit from extra workers.
 
-On Node v26.5.1, Windows x64, an Intel i9-9900K with 16 available logical CPUs, median results were:
+Automatic lint scheduling uses at most four workers and requires at least four file targets averaging at least 5 MB each, sufficient available parallelism, no stdin, and only reloadable plugins. Everything else stays on the main thread. Explicit `--workers 1` is strictly sequential; explicit higher counts override the workload threshold but not stdin or plugin capability constraints. Buffered admission and worker refresh remain active with explicit concurrency.
 
-| Workload                   | Main thread |   1 worker |  2 workers |  4 workers |  8 workers | Main RSS | 4-worker RSS |
-| -------------------------- | ----------: | ---------: | ---------: | ---------: | ---------: | -------: | -----------: |
-| 100 small files            |     27.6 ms |   112.2 ms |    91.9 ms |    92.0 ms |   114.5 ms | 56.5 MiB |    134.7 MiB |
-| 10 medium files            |    111.8 ms |   247.3 ms |   177.7 ms |   171.8 ms |   257.2 ms | 98.0 MiB |    314.8 MiB |
-| 4 large buffered files     |    891.2 ms |   853.7 ms |   568.4 ms |   441.4 ms |   430.0 ms |  473 MiB |      917 MiB |
-| 8 large buffered files     |  1,549.5 ms | 1,597.3 ms |   966.9 ms |   801.5 ms |   723.0 ms |  399 MiB |    1,247 MiB |
-| 4 large source-aware files |  3,892.2 ms | 4,138.2 ms | 2,205.8 ms | 1,301.4 ms | 1,337.1 ms |  207 MiB |      341 MiB |
-| 8 large source-aware files |  7,870.7 ms | 8,139.4 ms | 4,487.1 ms | 2,509.5 ms | 2,204.1 ms |  144 MiB |      379 MiB |
-| 4 Feature-heavy files      |    684.1 ms |   788.7 ms |   462.4 ms |   430.1 ms |   485.7 ms |  293 MiB |      520 MiB |
-| 10-file regression batch   |    113.4 ms |   226.5 ms |   161.3 ms |   183.9 ms |   237.5 ms |  104 MiB |      327 MiB |
-
-Pool readiness was roughly 62–78 ms at one to four workers and 92–114 ms at eight. A repeat run reproduced eight source-aware files at 7,901 ms sequential versus 2,612 ms with four workers (3.02×), and eight buffered files at 1,828 ms versus 818 ms (2.24×). The 100-small-file regression also reproduced.
-
-These measurements show repeatable wall-clock improvements for sufficiently large multi-file workloads at four workers. Source-aware work gains the most in the measured cases. Cheap and medium batches become slower, and buffered memory can exceed 1 GiB, so GeoLint keeps `workers=1` strictly single-threaded and uses a conservative automatic threshold. One huge GeoJSON file cannot benefit because work is parallelized only across files.
-
-### Production measurements
-
-The production pool uses versioned task messages, explicit error envelopes, plugin reload/identity validation and caching, crash replacement, ordered settlement, and snapshot tasks. Its one-to-four-worker readiness cost was about 101–145 ms. The measured results retain the large-workload benefit:
-
-| Workload                   | Main thread |  2 workers |  4 workers |  8 workers | 4-worker speedup | 4-worker RSS |
-| -------------------------- | ----------: | ---------: | ---------: | ---------: | ---------------: | -----------: |
-| 100 small files            |     25.1 ms |   135.0 ms |   133.8 ms |   163.6 ms |            0.19× |      146 MiB |
-| 10 medium files            |    108.7 ms |   212.5 ms |   214.8 ms |   286.3 ms |            0.51× |      324 MiB |
-| 4 large buffered files     |    756.2 ms |   590.6 ms |   443.4 ms |   527.5 ms |            1.71× |      918 MiB |
-| 8 large buffered files     |  1,483.7 ms | 1,016.8 ms |   789.5 ms |   813.0 ms |            1.88× |    1,164 MiB |
-| 4 large source-aware files |  3,866.6 ms | 2,254.2 ms | 1,475.2 ms | 1,560.5 ms |            2.62× |      349 MiB |
-| 8 large source-aware files |  8,032.6 ms | 4,205.4 ms | 2,555.5 ms | 2,097.9 ms |            3.14× |      388 MiB |
-| 4 Feature-heavy files      |    667.0 ms |   520.7 ms |   372.8 ms |   411.2 ms |            1.79× |      494 MiB |
-| 10-file regression batch   |    113.6 ms |   204.0 ms |   205.5 ms |   264.5 ms |            0.55× |      333 MiB |
-
-Eight large snapshot inputs measured 1,460.9 ms sequentially, 919.2 ms with two workers, 720.4 ms with four, and 683.7 ms with eight. Four workers used 1,336 MiB versus 479 MiB sequentially, so snapshot parallelism is available when explicitly requested but is not selected automatically.
-
-Automatic lint scheduling uses at most four workers and requires at least four file targets averaging at least 5 MB each, sufficient available parallelism, no stdin, and only reloadable plugins. Everything else stays on the main thread. Explicit `--workers 1` is always strictly sequential; explicit higher counts override the workload threshold but not stdin or plugin capability constraints. Worker benchmark artifacts record architecture, execution mode, and worker count as workload identity.
+Run `npm run benchmark:workers` or `npm run benchmark:workers:production` to measure the current pool on the current machine. Worker-ready, first-task, execution, total wall time, and process RSS are environment-dependent observations rather than guarantees.

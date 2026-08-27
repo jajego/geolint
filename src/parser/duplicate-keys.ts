@@ -1,5 +1,5 @@
 import type { JsonPointer } from '../types/semantic.js';
-import type { DuplicateJsonKey } from './json-source.js';
+import type { DuplicateJsonKey } from './indexed-source.js';
 
 interface ArrayFrame {
   readonly kind: 'array';

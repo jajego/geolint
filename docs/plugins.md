@@ -9,7 +9,7 @@ Plugins add synchronous GeoJSON rules under a user-selected namespace. Everythin
 import { definePlugin, defineRule, optionSchema } from '@jajego/geolint';
 
 const requireFeatureId = defineRule({
-  meta: { name: 'require-feature-id', schema: null },
+  meta: { name: 'require-feature-id', schema: null, listensTo: ['feature'] },
   create(context) {
     return {
       feature(feature) {
@@ -31,6 +31,7 @@ const allowedStatus = defineRule({
       property: optionSchema.string(),
       allowed: optionSchema.array(optionSchema.string()),
     }),
+    listensTo: ['propertyValue'],
   },
   create(context, options) {
     return {
@@ -84,7 +85,9 @@ The namespace belongs to the consuming project, so a rule's `meta.name` is its l
 
 ## Rule lifecycle and diagnostics
 
-Each enabled rule gets a fresh `create(context, options)` call for each file. Keep per-file state in that closure; do not rely on module-global mutable state. Local hooks run synchronously in deterministic semantic traversal order, not a universal source-member order. In particular, `property` and `propertyValue` use canonical JavaScript code-unit key order: properties written as `{ "z": 1, "a": 2 }` are observed as `a`, then `z`.
+Each enabled rule gets exactly one `create(context, options)` call for each file. Keep per-file state in that closure; do not rely on module-global mutable state. Local hooks run synchronously in deterministic semantic traversal order, not a universal source-member order. In particular, `property` and `propertyValue` use canonical JavaScript code-unit key order: properties written as `{ "z": 1, "a": 2 }` are observed as `a`, then `z`.
+
+Declare the semantic traversal events a rule may return with `meta.listensTo`. This is a conservative maximum: `create()` may return any subset, including no local hooks. A returned traversal hook not named in `listensTo` is a plugin-definition error. Existing V1 plugins without `listensTo` remain supported, but should add it when updated.
 
 `document` is finalization, not another traversal event: GeoLint invokes it once after scanning when its declared facts are complete. If a rule's `meta.requires` fact is incomplete because the input is malformed, GeoLint skips that finalization and records the reason in `skippedPolicies`.
 
@@ -130,18 +133,31 @@ Available facts are `featureCount`, `vertexCount`, `propertyStats`, `geometrySta
 
 ## Source-aware rules
 
-Return a `coordinateLexeme` hook when a rule needs the literal spelling of coordinate numbers. GeoLint automatically selects source-aware execution for text/files; plugin authors do not choose a parser strategy.
+Declare `listensTo: ['coordinateLexeme']` and return a `coordinateLexeme` hook when a rule needs the literal spelling of coordinate numbers. GeoLint automatically selects the needed source handling for text/files; plugin authors do not choose a parser strategy.
 
 ```ts
-coordinateLexeme(event) {
-  if (event.rawValues.some((value) => /[eE]/.test(value))) {
-    context.report({
-      message: 'Exponent notation is not allowed.',
-      path: event.path,
-      ...(event.byteOffset === undefined ? {} : { byteOffset: event.byteOffset }),
-    });
-  }
-}
+const rawCoordinateFormat = defineRule({
+  meta: {
+    name: 'raw-coordinate-format',
+    schema: null,
+    listensTo: ['coordinateLexeme'],
+  },
+  create(context) {
+    return {
+      coordinateLexeme(event) {
+        if (event.rawValues.some((value) => /[eE]/.test(value))) {
+          context.report({
+            message: 'Exponent notation is not allowed.',
+            path: event.path,
+            ...(event.byteOffset === undefined
+              ? {}
+              : { byteOffset: event.byteOffset }),
+          });
+        }
+      },
+    };
+  },
+});
 ```
 
 `lintGeoJSONText()` and file/batch linting preserve this source information. `lintGeoJSON()` receives an already-parsed JavaScript value, so it rejects an enabled `coordinateLexeme` rule with `GeoLintCapabilityError` / `GEOLINT_CAPABILITY_NUMERIC_LEXEMES`. Disable source-aware rules for parsed-object calls when that is appropriate.
@@ -159,9 +175,9 @@ Use a peer dependency so the host and plugin share one GeoLint API, plus the sam
   "type": "module",
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "peerDependencies": { "@jajego/geolint": "^0.1.4" },
+  "peerDependencies": { "@jajego/geolint": "^0.1.7" },
   "devDependencies": {
-    "@jajego/geolint": "^0.1.4",
+    "@jajego/geolint": "^0.1.7",
     "typescript": "^5.8.0"
   }
 }

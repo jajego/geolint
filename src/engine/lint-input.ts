@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { constants as bufferConstants } from 'node:buffer';
+import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { resolveFileConfig } from '../config/resolve.js';
@@ -7,14 +8,21 @@ import { assertJsonValue } from '../input/json-value.js';
 import { decodeSource } from '../input/decode-source.js';
 import { parseBufferedJSON } from '../parser/buffered-json.js';
 import { scanDuplicateKeysFromValidJSON } from '../parser/duplicate-keys.js';
-import {
-  type DuplicateJsonKey,
-  JsonSourceSyntaxError,
-} from '../parser/json-source.js';
 import { formatQuotedValue } from '../terminal-text.js';
-import { parseIndexedSource } from '../parser/indexed-source.js';
+import {
+  ByteSourceMaterializationError,
+  type DuplicateJsonKey,
+  JsonSourceEncodingError,
+  JsonSourceSyntaxError,
+  parseIndexedFileSource,
+  parseIndexedSource,
+} from '../parser/indexed-source.js';
 import { DiagnosticCollector } from './diagnostics.js';
-import { compilePolicy, type CompiledPolicy } from './policy.js';
+import {
+  compilePolicy,
+  planPolicyRequirements,
+  type CompiledPolicy,
+} from './policy.js';
 import { createExecutionRequirements } from './requirements.js';
 import { scanGeoJSON } from '../scanner/scan.js';
 import {
@@ -40,11 +48,20 @@ import type { ExecutionRequirements } from './requirements.js';
 
 export type ParserStrategy = 'auto' | 'buffered' | 'indexed';
 
+// Per-file representation policy: switch before buffered amplification becomes severe.
+const AUTO_INDEXED_FILE_SIZE_THRESHOLD = 50 * 1024 * 1024;
+
 export interface ResolvedSourceOptions {
   readonly filePath: string;
   readonly config: ResolvedConfig;
   readonly parser: ParserStrategy;
   readonly baseline?: BaselineFileEntry;
+}
+
+/** Internal worker result: keeps parser execution details out of the public API. */
+export interface FileLintExecution {
+  readonly result: FileLintResult;
+  readonly parserStrategy: Exclude<ParserStrategy, 'auto'>;
 }
 
 export interface InMemoryLintOptions extends GeoLintRuntimeContext {
@@ -55,6 +72,32 @@ export type FileLintOptions = GeoLintRuntimeContext;
 
 interface InternalParserOptions {
   readonly parser: ParserStrategy;
+}
+
+export function selectFileParserStrategy(
+  parser: ParserStrategy,
+  requirements: Pick<
+    ExecutionRequirements,
+    'numericLexemes' | 'featureByteSpans'
+  >,
+  sourceBytes: number,
+): {
+  readonly strategy: Exclude<ParserStrategy, 'auto'>;
+  readonly reason:
+    | 'explicit parser'
+    | 'source-aware requirement'
+    | 'JavaScript string safety'
+    | 'large-file memory safety'
+    | 'ordinary auto path';
+} {
+  if (parser !== 'auto') return { strategy: parser, reason: 'explicit parser' };
+  if (requirements.numericLexemes || requirements.featureByteSpans)
+    return { strategy: 'indexed', reason: 'source-aware requirement' };
+  if (sourceBytes > bufferConstants.MAX_STRING_LENGTH)
+    return { strategy: 'indexed', reason: 'JavaScript string safety' };
+  if (sourceBytes >= AUTO_INDEXED_FILE_SIZE_THRESHOLD)
+    return { strategy: 'indexed', reason: 'large-file memory safety' };
+  return { strategy: 'buffered', reason: 'ordinary auto path' };
 }
 
 async function inputContext(options: InMemoryLintOptions): Promise<{
@@ -108,6 +151,34 @@ function requirementsFor(
   });
 }
 
+interface CompiledRun {
+  readonly startedAt: number;
+  readonly collector: DiagnosticCollector;
+  readonly policy: CompiledPolicy;
+}
+
+function compileRun(
+  options: ResolvedSourceOptions,
+  inputKind: 'object' | 'text',
+): CompiledRun {
+  const startedAt = performance.now();
+  const collector = new DiagnosticCollector(
+    options.filePath,
+    options.config.diagnostics,
+  );
+  return {
+    startedAt,
+    collector,
+    policy: compilePolicy(
+      options.config,
+      options.filePath,
+      inputKind,
+      collector,
+      options.baseline,
+    ),
+  };
+}
+
 function scanResult(
   value: JsonValue,
   collector: DiagnosticCollector,
@@ -154,6 +225,15 @@ function reportDuplicateKeys(
   }
 }
 
+function reportSourceTooLarge(collector: DiagnosticCollector): void {
+  collector.report({
+    code: 'parse/source-too-large',
+    source: 'parser',
+    message:
+      'A requested JSON value exceeds the JavaScript string representation limit.',
+  });
+}
+
 async function regressionBaseline(
   config: ResolvedConfig,
   filePath: string,
@@ -167,6 +247,7 @@ async function regressionBaseline(
 function lintResolvedText(
   text: string,
   options: ResolvedSourceOptions,
+  compiled?: CompiledRun,
 ): FileLintResult {
   if (typeof text !== 'string') {
     throw new GeoLintInputError(
@@ -174,18 +255,8 @@ function lintResolvedText(
       'GEOLINT_INVALID_JSON_TEXT',
     );
   }
-  const startedAt = performance.now();
-  const collector = new DiagnosticCollector(
-    options.filePath,
-    options.config.diagnostics,
-  );
-  const policy = compilePolicy(
-    options.config,
-    options.filePath,
-    'text',
-    collector,
-    options.baseline,
-  );
+  const run = compiled ?? compileRun(options, 'text');
+  const { startedAt, collector, policy } = run;
   const requirements = requirementsFor(policy, true);
   if (
     options.parser === 'buffered' &&
@@ -322,6 +393,40 @@ export async function lintResolvedFile(
   absolutePath: string,
   options: ResolvedSourceOptions,
 ): Promise<FileLintResult> {
+  return (await lintResolvedFileExecution(absolutePath, options)).result;
+}
+
+export async function lintResolvedFileExecution(
+  absolutePath: string,
+  options: ResolvedSourceOptions,
+): Promise<FileLintExecution> {
+  let sourceBytes: number;
+  try {
+    sourceBytes = (await stat(absolutePath)).size;
+  } catch (cause) {
+    throw new GeoLintIOError(
+      `Could not read GeoJSON file at ${absolutePath}.`,
+      'GEOLINT_FILE_READ_FAILED',
+      { cause },
+    );
+  }
+  const plan = planPolicyRequirements(options.config);
+  const run = compileRun(options, 'text');
+  const requirements = requirementsFor(run.policy, true);
+  const indexed = await lintIndexedFileIfNeeded(
+    absolutePath,
+    options,
+    sourceBytes,
+    run,
+    requirements,
+    {
+      numericLexemes:
+        plan.requirements.numericLexemes || requirements.numericLexemes,
+      featureByteSpans:
+        plan.requirements.featureByteSpans || requirements.featureByteSpans,
+    },
+  );
+  if (indexed) return { result: indexed, parserStrategy: 'indexed' };
   let bytes: Buffer;
   try {
     bytes = await readFile(absolutePath);
@@ -332,30 +437,136 @@ export async function lintResolvedFile(
       { cause },
     );
   }
-  return lintResolvedBytes(bytes, options);
+  return {
+    result: lintResolvedBytesWithRun(bytes, options, run),
+    parserStrategy: 'buffered',
+  };
+}
+
+async function lintIndexedFileIfNeeded(
+  absolutePath: string,
+  options: ResolvedSourceOptions,
+  sourceBytes: number,
+  run: CompiledRun,
+  requirements: ExecutionRequirements,
+  parserRequirements: Pick<
+    ExecutionRequirements,
+    'numericLexemes' | 'featureByteSpans'
+  >,
+): Promise<FileLintResult | undefined> {
+  const { startedAt, collector, policy } = run;
+  if (
+    options.parser === 'buffered' &&
+    (parserRequirements.numericLexemes || parserRequirements.featureByteSpans)
+  ) {
+    throw new GeoLintCapabilityError(
+      `The buffered parser cannot satisfy ${parserRequirements.numericLexemes ? 'numeric-lexeme' : 'Feature-span'} requirements. Use parser "auto" or "indexed".`,
+      parserRequirements.numericLexemes
+        ? 'GEOLINT_CAPABILITY_NUMERIC_LEXEMES'
+        : 'GEOLINT_CAPABILITY_FEATURE_BYTES',
+    );
+  }
+  if (
+    selectFileParserStrategy(options.parser, parserRequirements, sourceBytes)
+      .strategy === 'buffered'
+  )
+    return undefined;
+  let parsed;
+  try {
+    parsed = parseIndexedFileSource(absolutePath, requirements);
+  } catch (error) {
+    if (error instanceof JsonSourceEncodingError) {
+      collector.report({
+        code: 'parse/invalid-encoding',
+        source: 'parser',
+        message: 'Input is not valid UTF-8.',
+        byteOffset: error.byteOffset,
+      });
+    } else if (error instanceof JsonSourceSyntaxError) {
+      collector.report({
+        code: 'parse/invalid-json',
+        source: 'parser',
+        message: 'Input is not valid JSON.',
+        byteOffset: error.byteOffset,
+      });
+    } else if (error instanceof ByteSourceMaterializationError) {
+      reportSourceTooLarge(collector);
+    } else {
+      throw new GeoLintIOError(
+        `Could not read GeoJSON file at ${absolutePath}.`,
+        'GEOLINT_FILE_READ_FAILED',
+        { cause: error },
+      );
+    }
+    return fileResult(collector, startedAt);
+  }
+  try {
+    reportDuplicateKeys(collector, parsed.duplicateKeys);
+    return scanResult(
+      parsed.value,
+      collector,
+      policy,
+      startedAt,
+      requirements,
+      parsed.sourceBytes,
+    );
+  } catch (error) {
+    if (!(error instanceof ByteSourceMaterializationError)) throw error;
+    reportSourceTooLarge(collector);
+    return fileResult(collector, startedAt);
+  } finally {
+    parsed.close();
+  }
 }
 
 export function lintResolvedBytes(
   bytes: Uint8Array,
   options: ResolvedSourceOptions,
 ): FileLintResult {
+  return lintResolvedBytesWithRun(bytes, options);
+}
+
+function lintResolvedBytesWithRun(
+  bytes: Uint8Array,
+  options: ResolvedSourceOptions,
+  run?: CompiledRun,
+): FileLintResult {
   let text: string;
   try {
     text = decodeSource(bytes);
-  } catch {
-    const startedAt = performance.now();
-    const collector = new DiagnosticCollector(
-      options.filePath,
-      options.config.diagnostics,
-    );
-    collector.report({
-      code: 'parse/invalid-encoding',
-      source: 'parser',
-      message: 'Input is not valid UTF-8.',
-    });
-    return fileResult(collector, startedAt);
+  } catch (error) {
+    const startedAt = run?.startedAt ?? performance.now();
+    const collector =
+      run?.collector ??
+      new DiagnosticCollector(options.filePath, options.config.diagnostics);
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'ERR_ENCODING_INVALID_ENCODED_DATA'
+    ) {
+      collector.report({
+        code: 'parse/invalid-encoding',
+        source: 'parser',
+        message: 'Input is not valid UTF-8.',
+      });
+      return fileResult(collector, startedAt);
+    }
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'ERR_STRING_TOO_LONG'
+    ) {
+      collector.report({
+        code: 'parse/source-too-large',
+        source: 'parser',
+        message:
+          'The buffered parser cannot represent this source as a JavaScript string. Use parser "auto" or "indexed".',
+      });
+      return fileResult(collector, startedAt);
+    }
+    throw error;
   }
-  return lintResolvedText(text, options);
+  return lintResolvedText(text, options, run);
 }
 
 export function lintFile(

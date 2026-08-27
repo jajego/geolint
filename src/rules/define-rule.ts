@@ -3,6 +3,7 @@ import type {
   FileSummary,
   FileCompleteness,
   SummaryFactName,
+  RuleEventName,
   JsonPointer,
 } from '../types/semantic.js';
 import type { InferRuleOptions, RuleOptionsSchema } from './option-schema.js';
@@ -90,6 +91,8 @@ export interface RuleMeta<
   readonly name: string;
   readonly schema: S;
   readonly requires?: R;
+  /** Conservative maximum of semantic traversal events returned by create(). */
+  readonly listensTo?: readonly RuleEventName[];
   readonly docs?: RuleDocs;
   readonly recommended?: boolean;
   readonly performance?: string;

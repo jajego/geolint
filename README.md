@@ -152,7 +152,7 @@ for (const diagnostic of result.diagnostics) {
 
 Projects with domain-specific policy can add synchronous, typed plugin rules. Plugins are an advanced extension point; see the plugin guide for the worker and trust model.
 
-GeoLint automatically chooses buffered or source-aware analysis according to the policy and selectively parallelizes eligible multi-file workloads. See the performance guide for methodology and tradeoffs rather than universal speed claims.
+GeoLint uses its fast buffered parser for ordinary GeoJSON and automatically switches to a byte-backed, memory-bounded indexed representation for large or source-aware file inputs. For multi-file workloads, it manages buffered concurrency automatically to limit aggregate memory pressure. See the performance guide for methodology and tradeoffs rather than universal speed claims.
 
 ## Scope
 

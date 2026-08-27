@@ -15,7 +15,11 @@ import {
   indexedCoordinateKind,
   indexedCoordinateNumber,
   indexedCoordinateSpan,
+  indexedCoordinateSupportsDirect,
   indexedCoordinateTextSpan,
+  indexedCoordinateDirectPosition,
+  indexedCoordinateByteSpan,
+  indexedCoordinateUsesByteDirect,
   indexedFeatureSpan,
   indexedSequenceElements,
   isIndexedCoordinateValue,
@@ -461,6 +465,15 @@ function positionValues(
     return { values: value as number[] };
   }
   const values: number[] = [];
+  if (!collectRaw && indexedCoordinateUsesByteDirect(value)) {
+    const direct = indexedCoordinateDirectPosition(value);
+    return direct
+      ? {
+          values: direct,
+          byteOffset: indexedCoordinateSpan(value).startByte,
+        }
+      : undefined;
+  }
   const rawValues: string[] | undefined = collectRaw ? [] : undefined;
   if (rawValues && state.instrumentation) {
     state.instrumentation.rawLexemeCollections =
@@ -862,7 +875,21 @@ function scanDirectIndexedCoordinateTree(
   metrics: GeometryMetrics,
   state: ScanState,
 ): void {
+  const byteSource = indexedCoordinateByteSpan(coordinates);
+  if (byteSource) {
+    scanDirectByteCoordinateTree(
+      type,
+      byteSource,
+      coordinatesPath,
+      featureIndex,
+      metrics,
+      state,
+    );
+    return;
+  }
   const source = indexedCoordinateTextSpan(coordinates);
+  if (!source)
+    throw new Error('Indexed direct coordinate source is unavailable.');
   if (type === 'Point') {
     directVisitPosition(
       source.text,
@@ -982,6 +1009,267 @@ function scanDirectIndexedCoordinateTree(
   );
 }
 
+type ByteCoordinateSource = NonNullable<
+  ReturnType<typeof indexedCoordinateByteSpan>
+>;
+
+function byteWhitespace(source: ByteCoordinateSource, offset: number): number {
+  while ([0x20, 0x09, 0x0a, 0x0d].includes(source.source.byte(offset)!))
+    offset += 1;
+  return offset;
+}
+
+function byteValueEnd(
+  source: ByteCoordinateSource,
+  start: number,
+  end: number,
+): number {
+  let offset = byteWhitespace(source, start);
+  const first = source.source.byte(offset)!;
+  if (first === 0x22) {
+    for (offset += 1; offset < end; offset += 1) {
+      const byte = source.source.byte(offset)!;
+      if (byte === 0x5c) offset += 1;
+      else if (byte === 0x22) return offset + 1;
+    }
+    return end;
+  }
+  if (first !== 0x5b && first !== 0x7b) {
+    while (offset < end && ![0x2c, 0x5d].includes(source.source.byte(offset)!))
+      offset += 1;
+    return offset;
+  }
+  let depth = 0;
+  while (offset < end) {
+    const byte = source.source.byte(offset)!;
+    if (byte === 0x22) {
+      offset = byteValueEnd(source, offset, end);
+      continue;
+    }
+    if (byte === 0x5b || byte === 0x7b) depth += 1;
+    else if ((byte === 0x5d || byte === 0x7d) && --depth === 0)
+      return offset + 1;
+    offset += 1;
+  }
+  return end;
+}
+
+function byteElements(
+  source: ByteCoordinateSource,
+  start: number,
+  end: number,
+  visit: (start: number, end: number, array: boolean) => void,
+): void {
+  let offset = byteWhitespace(source, start + 1);
+  while (offset < end - 1) {
+    const valueEnd = byteValueEnd(source, offset, end);
+    visit(offset, valueEnd, source.source.byte(offset) === 0x5b);
+    offset = byteWhitespace(source, valueEnd);
+    if (source.source.byte(offset) !== 0x2c) break;
+    offset = byteWhitespace(source, offset + 1);
+  }
+}
+
+function bytePosition(
+  source: ByteCoordinateSource,
+  start: number,
+  end: number,
+  materialize: boolean,
+): DirectPosition | undefined {
+  if (source.source.byte(start) !== 0x5b) return undefined;
+  const values: number[] | undefined = materialize ? [] : undefined;
+  let length = 0,
+    x = 0,
+    y = 0,
+    valid = true;
+  byteElements(source, start, end, (numberStart, numberEnd, array) => {
+    if (array) {
+      valid = false;
+      return;
+    }
+    const value = source.source.number(numberStart, numberEnd, false).value;
+    if (!Number.isFinite(value)) {
+      valid = false;
+      return;
+    }
+    if (length === 0) x = value;
+    else if (length === 1) y = value;
+    values?.push(value);
+    length += 1;
+  });
+  return valid && length >= 2
+    ? { length, x, y, ...(values ? { values } : {}) }
+    : undefined;
+}
+
+function byteVisitPosition(
+  source: ByteCoordinateSource,
+  start: number,
+  end: number,
+  path: JsonPointer,
+  index: number | undefined,
+  feature: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+): void {
+  const position = bytePosition(
+    source,
+    start,
+    end,
+    Boolean(state.coordinateObservation || state.listener?.coordinate),
+  );
+  if (!position) {
+    if (state.instrumentation) state.instrumentation.positionVisits += 1;
+    invalidPosition(path, index, feature, metrics, state);
+    return;
+  }
+  observeDirectPosition(position, path, index, feature, metrics, state);
+}
+
+function scanDirectByteCoordinateTree(
+  type: GeoJSONGeometryType,
+  source: ByteCoordinateSource,
+  path: JsonPointer,
+  feature: number | undefined,
+  metrics: GeometryMetrics,
+  state: ScanState,
+): void {
+  const line = (
+    start: number,
+    end: number,
+    pointer: JsonPointer,
+    ring: boolean,
+  ): void => {
+    let length = 0;
+    let firstStart = 0;
+    let firstEnd = 0;
+    let firstArray = false;
+    let lastStart = 0;
+    let lastEnd = 0;
+    let lastArray = false;
+    byteElements(source, start, end, (positionStart, positionEnd, array) => {
+      if (length === 0) {
+        firstStart = positionStart;
+        firstEnd = positionEnd;
+        firstArray = array;
+      }
+      lastStart = positionStart;
+      lastEnd = positionEnd;
+      lastArray = array;
+      length += 1;
+    });
+    const minimum = ring ? 4 : 2;
+    if (length < minimum)
+      invalidCoordinates(
+        pointer,
+        feature,
+        metrics,
+        state,
+        ring
+          ? 'Expected a linear ring containing at least four Positions.'
+          : 'Expected a LineString containing at least two Positions.',
+      );
+    if (ring && length >= minimum) {
+      const a = firstArray
+        ? bytePosition(source, firstStart, firstEnd, true)
+        : undefined;
+      const b = lastArray
+        ? bytePosition(source, lastStart, lastEnd, true)
+        : undefined;
+      if (
+        a &&
+        b &&
+        (a.length !== b.length ||
+          a.values!.some((value, index) => value !== b.values![index]))
+      )
+        invalidCoordinates(
+          pointer,
+          feature,
+          metrics,
+          state,
+          'Expected a linear ring whose first and last Positions are identical.',
+        );
+    }
+    let index = 0;
+    byteElements(source, start, end, (positionStart, positionEnd) => {
+      byteVisitPosition(
+        source,
+        positionStart,
+        positionEnd,
+        pointer,
+        index,
+        feature,
+        metrics,
+        state,
+      );
+      index += 1;
+    });
+  };
+  if (type === 'LineString') {
+    line(source.start, source.end, path, false);
+    return;
+  }
+  const levels =
+    type === 'Point'
+      ? 0
+      : type === 'MultiPoint'
+        ? 1
+        : type === 'MultiLineString' || type === 'Polygon'
+          ? 2
+          : 3;
+  const walk = (
+    start: number,
+    end: number,
+    level: number,
+    pointer: JsonPointer,
+    index: number | undefined,
+  ): void => {
+    if (level === 0) {
+      byteVisitPosition(
+        source,
+        start,
+        end,
+        pointer,
+        index,
+        feature,
+        metrics,
+        state,
+      );
+      return;
+    }
+    if (type === 'MultiLineString' && level === 1) {
+      line(start, end, pointer, false);
+      return;
+    }
+    if (type === 'Polygon' && level === 1) {
+      line(start, end, pointer, true);
+      return;
+    }
+    if (type === 'MultiPolygon' && level === 1) {
+      line(start, end, pointer, true);
+      return;
+    }
+    let child = 0;
+    byteElements(source, start, end, (childStart, childEnd, array) => {
+      const childPath = level === 1 ? pointer : appendPointer(pointer, child);
+      if (level === 2 && (type === 'Polygon' || type === 'MultiPolygon'))
+        metrics.ringCount += 1;
+      if (!array && !(type === 'MultiPoint' && level === 1))
+        invalidCoordinates(childPath, feature, metrics, state);
+      else
+        walk(
+          childStart,
+          childEnd,
+          level - 1,
+          childPath,
+          level === 1 ? child : undefined,
+        );
+      child += 1;
+    });
+  };
+  walk(source.start, source.end, levels, path, undefined);
+}
+
 function scanCoordinateTree(
   type: GeoJSONGeometryType,
   coordinates: JsonValue[] | IndexedCoordinateValue,
@@ -994,7 +1282,8 @@ function scanCoordinateTree(
   if (
     !state.forceGenericIndexedCoordinates &&
     !state.requirements.numericLexemes &&
-    isIndexedCoordinateValue(coordinates)
+    isIndexedCoordinateValue(coordinates) &&
+    indexedCoordinateSupportsDirect(coordinates)
   ) {
     if (state.instrumentation) {
       state.instrumentation.directCoordinateTraversals =

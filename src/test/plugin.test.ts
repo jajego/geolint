@@ -10,6 +10,7 @@ import {
   GeoLintCapabilityError,
   GeoLintConfigError,
   GeoLintPluginError,
+  lintFile,
   lintGeoJSON,
   lintGeoJSONText,
   optionSchema,
@@ -186,6 +187,106 @@ test('source hooks force indexed text execution and reject object input', async 
     { config },
   );
   assert.equal(result.diagnostics[0]?.code, 'acme/raw-coordinate-format');
+});
+
+test('declared file rules initialize exactly once on buffered and indexed paths', async () => {
+  const counts = { buffered: 0, indexed: 0 };
+  const lifecycle = definePlugin({
+    meta: { apiVersion: 1 },
+    rules: {
+      buffered: defineRule({
+        meta: { name: 'buffered', schema: null, listensTo: ['coordinate'] },
+        create() {
+          counts.buffered += 1;
+          return { coordinate() {} };
+        },
+      }),
+      indexed: defineRule({
+        meta: {
+          name: 'indexed',
+          schema: null,
+          listensTo: ['coordinateLexeme'],
+        },
+        create() {
+          counts.indexed += 1;
+          return { coordinateLexeme() {} };
+        },
+      }),
+    },
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'geolint-create-once-'));
+  try {
+    const path = join(directory, 'map.geojson');
+    await writeFile(path, '{"type":"Point","coordinates":[1,2]}');
+    await lintFile(path, {
+      config: {
+        plugins: { lifecycle },
+        rules: { 'lifecycle/buffered': 'error' },
+      },
+    });
+    await lintFile(path, {
+      config: {
+        plugins: { lifecycle },
+        rules: { 'lifecycle/indexed': 'error' },
+      },
+    });
+    assert.deepEqual(counts, { buffered: 1, indexed: 1 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('declared listener hooks must be a subset of meta.listensTo', async () => {
+  const make = (listensTo: readonly ('coordinate' | 'coordinateLexeme')[]) =>
+    definePlugin({
+      meta: { apiVersion: 1 },
+      rules: {
+        rule: defineRule({
+          meta: { name: 'rule', schema: null, listensTo },
+          create: (() => ({ coordinateLexeme() {} })) as never,
+        }),
+      },
+    });
+  await assert.rejects(
+    lintGeoJSONText('{"type":"Point","coordinates":[1,2]}', {
+      filename: 'declared.geojson',
+      config: {
+        plugins: { declared: make(['coordinate']) },
+        rules: { 'declared/rule': 'error' },
+      },
+    }),
+    (error) =>
+      error instanceof GeoLintPluginError &&
+      error.ruleId === 'declared/rule' &&
+      error.filePath === 'declared.geojson' &&
+      String(error.cause).includes('coordinateLexeme'),
+  );
+  await assert.doesNotReject(
+    lintGeoJSONText('{"type":"Point","coordinates":[1,2]}', {
+      config: {
+        plugins: { declared: make(['coordinate', 'coordinateLexeme']) },
+        rules: { 'declared/rule': 'error' },
+      },
+    }),
+  );
+  const empty = definePlugin({
+    meta: { apiVersion: 1 },
+    rules: {
+      empty: defineRule({
+        meta: { name: 'empty', schema: null, listensTo: [] },
+        create: (() => ({ property() {} })) as never,
+      }),
+    },
+  });
+  await assert.rejects(
+    lintGeoJSONText('{"type":"Feature","properties":{},"geometry":null}', {
+      config: {
+        plugins: { empty },
+        rules: { 'empty/empty': 'error' },
+      },
+    }),
+    GeoLintPluginError,
+  );
 });
 
 test('semantic plugin output is equivalent for object, buffered, and indexed execution', async () => {
@@ -460,6 +561,27 @@ test('plugin validation rejects ambiguous or unsafe definitions', () => {
   ];
   for (const value of invalid) {
     assert.throws(() => definePlugin(value as never), GeoLintConfigError);
+  }
+  for (const listensTo of [
+    ['coordinate', 'coordinate'],
+    ['document'],
+    'coordinate',
+  ]) {
+    assert.throws(
+      () =>
+        definePlugin({
+          meta: { apiVersion: 1 },
+          rules: {
+            local: {
+              meta: { name: 'local', schema: null, listensTo },
+              create() {
+                return {};
+              },
+            },
+          },
+        } as never),
+      GeoLintConfigError,
+    );
   }
 });
 

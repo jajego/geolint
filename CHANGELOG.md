@@ -4,10 +4,21 @@ GeoLint follows [Semantic Versioning](https://semver.org/). Until the first stab
 
 ## Unreleased
 
+## 0.1.7 - 2026-08-27
+
+### Added
+
+- Add optional `RuleMeta.listensTo` semantic event declarations for static execution planning. Rule `create()` now runs exactly once per enabled rule and file, while plugins without declarations remain compatible.
+
 ### Changed
 
-- Improve target discovery by pruning safe configured ignores during traversal, avoiding redundant regular-file metadata work, collapsing overlapping configured targets earlier, and reducing the globbing dependency footprint by
-  migrating from fast-glob to tinyglobby.
+- Add byte-backed, memory-bounded indexed file parsing and improve `auto` selection for large and source-aware GeoJSON inputs.
+- Limit aggregate buffered work in parallel batches and refresh workers after sufficiently large buffered tasks to reduce retained memory between tasks.
+- Move target discovery from fast-glob to tinyglobby while preserving GeoLint's supported target semantics, with safer ignore pruning, casing validation, symlink handling, physical-identity deduplication, and deterministic ordering.
+
+### Fixed
+
+- Report `parse/source-too-large` consistently when indexed execution cannot materialize an individual JSON value within JavaScript string representation limits.
 
 ## 0.1.6 - 2026-08-16
 

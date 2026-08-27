@@ -5,7 +5,7 @@ import {
   validatePlugin,
   type GeoLintPlugin,
 } from '../plugins/plugin.js';
-import { lintResolvedFile } from '../engine/lint-input.js';
+import { lintResolvedFileExecution } from '../engine/lint-input.js';
 import { captureSnapshotFile } from '../regression/snapshot.js';
 import { GeoLintError, GeoLintPluginError } from '../engine/errors.js';
 import type {
@@ -56,7 +56,7 @@ async function lint(task: WorkerLintTask) {
       ]),
     ),
   );
-  return lintResolvedFile(task.absolutePath, {
+  return lintResolvedFileExecution(task.absolutePath, {
     filePath: task.filePath,
     config: { ...task.policy, plugins },
     parser: task.parser,
@@ -90,7 +90,7 @@ port.on('message', async (task: WorkerTask) => {
         protocolVersion: 1,
         type: 'lint-result',
         taskId: task.taskId,
-        result: await lint(task),
+        ...(await lint(task)),
       } satisfies WorkerResponse);
     } else if (task.type === 'snapshot') {
       port.postMessage({

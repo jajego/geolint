@@ -9,9 +9,9 @@ loading support is deferred to Phase 1.
 ## Phase 1: Config loading and glob matching
 
 V5 requires consistent TypeScript config support and a defined glob subset.
-Config files load through Jiti, while Fast Glob and Picomatch are used only
-behind GeoLint-owned loading and matching contracts. This keeps their behavior
-out of the public API and permits replacement without changing user config.
+Config files load through Jiti, while tinyglobby enumeration and Picomatch
+matching remain behind GeoLint-owned contracts. Their backend behavior is not
+part of the public target syntax.
 
 ## Phase 1 hardening: stable resolution boundaries
 
@@ -23,10 +23,14 @@ provided.
 
 ## Phase 1 final hardening: glob and alias contracts
 
-GeoLint validates its V1 glob subset before delegating to Picomatch or Fast
-Glob. Glob matching uses a discovered logical path; `realpath` is reserved for
-later alias deduplication, so a file symlink remains eligible through the
-configured path that selected it.
+GeoLint validates its V1 glob subset before delegating to Picomatch or
+tinyglobby. Configured patterns are enumerated together, and only literal
+subtree ignores ending in `/**` are safe to prune during traversal; the normal
+ignore matcher remains authoritative afterward. Static prefixes require exact
+filesystem casing, while result casing is restored conservatively. File links
+retain the logical path that selected them, directory links are not traversed,
+and bounded `realpath` work deduplicates physical aliases before deterministic
+path sorting.
 
 ## Phase 2: buffered semantic decisions
 
@@ -86,17 +90,25 @@ every Position. Built-in range and ID policies therefore use narrow internal
 validated observations; public rule hooks retain their full event contracts.
 Paths and diagnostic details are materialized only for retained findings.
 
-`coordinate-precision` and `budget/feature-bytes` are registered and validated,
-but fail capability preflight until indexed numeric lexemes and exact Feature
-spans exist. Object-input file-size budgets likewise fail because exact source
-bytes cannot be reconstructed. No source values are approximated.
+`coordinate-precision` and `budget/feature-bytes` require numeric lexemes and
+exact Feature spans from source input, which indexed execution provides.
+Parsed-object input still fails capability preflight for those facts, and for
+file-size budgets, because exact source bytes cannot be reconstructed. No
+source values are approximated.
 
-`coordinateLexeme()` is the public capability boundary: subscribing requests
-positions and numeric lexemes automatically, while ordinary `coordinate()`
-remains lexeme-free. Required aggregate facts narrow both their values and
-completeness statuses, and a non-empty `meta.requires` must have a `document()`
-consumer. Budget setting objects reject fields other than `limit` and
-`severity`.
+`meta.listensTo` is a rule's conservative maximum set of semantic traversal
+events. It lets static planning derive scanner requirements without invoking
+plugin code; `create()` still runs exactly once for each enabled rule and file
+and may return any declared subset. Undeclared returned traversal hooks are
+plugin-definition errors. Legacy V1 plugins without `listensTo` remain
+supported and are planned conservatively.
+
+`coordinateLexeme()` is the public capability boundary: declaring or returning
+it requests positions and numeric lexemes automatically, while ordinary
+`coordinate()` remains lexeme-free. Required aggregate facts remain in
+`meta.requires`, narrow both their values and completeness statuses, and a
+non-empty `requires` must have a `document()` consumer. Budget setting objects
+reject fields other than `limit` and `severity`.
 
 The recommended ID rules currently keep separate duplicate-tracking sets in
 the scanner aggregate and the local uniqueness rule. Sharing them would couple
@@ -137,21 +149,28 @@ duplicate occurrences cannot exceed present ID occurrences minus one.
 
 Semantic-only text remains on the buffered `JSON.parse` path. Numeric lexemes
 or Feature spans select indexed-source enrichment over the shared iterative
-JSON source cursor. Forced strategy
-selection remains internal test/benchmark infrastructure until the later CLI
-surface is frozen. The cursor validates the complete JSON grammar with an
-explicit container stack before semantic dispatch, then replays only winning
-members. Coordinate arrays remain source spans and are decoded one Position at
-a time through the shared scanner; raw lexeme collections are created only
-when planned, and no coordinate token tree or decoded coordinate graph is
-retained.
+JSON source cursor; file input can also select indexed execution under the
+resource policy below. The CLI exposes `auto`, `buffered`, and `indexed`, with
+`auto` as the intended default; public Node APIs select automatically. The
+cursor validates the complete JSON grammar with an explicit container stack
+before semantic dispatch, then replays only winning members. Coordinate arrays
+remain source spans and are decoded one Position at a time through the shared
+scanner; raw lexeme collections are created only when planned, and no
+coordinate token tree or decoded coordinate graph is retained.
 
-The V1 file and snapshot paths share one fatal UTF-8 decoder that preserves a
-leading BOM. A BOM is therefore visible to the JSON grammar and rejected like
-a leading U+FEFF passed directly to `JSON.parse`; invalid byte sequences remain
-`parse/invalid-encoding`. Chunked file replay and stdin temp spooling remain
-deferred until a later source/CLI phase; benchmarks therefore do not justify a
-semantic-only size crossover. Encoded Feature spans are half-open UTF-8 byte
+The V1 file and snapshot paths preserve a leading BOM. A BOM is therefore
+visible to the JSON grammar and rejected like a leading U+FEFF passed directly
+to `JSON.parse`; invalid byte sequences remain `parse/invalid-encoding`.
+Indexed file lint uses a bounded byte window with byte-first UTF-8 and JSON
+validation, then replays winning source spans through the same scanner. Auto
+selects that path whenever source-only capabilities are needed, a file reaches
+the 50 MiB internal large-file threshold, or the conservative file-byte check
+for JavaScript string representation safety applies. The threshold prevents
+excessive buffered amplification while smaller files remain on the faster
+buffered path. `buffer.constants.MAX_STRING_LENGTH` is a JavaScript/V8 string
+code-unit capacity, not a generic Node file-byte limit; comparing source file
+bytes with it is a separate conservative safety check. Stdin remains the
+existing in-memory path. Encoded Feature spans are half-open UTF-8 byte
 ranges excluding collection separators and outer document whitespace. Timing
 instrumentation separates complete syntax validation from the initial eager
 index replay; later lazy replay is included in semantic traversal timing and
@@ -165,6 +184,33 @@ spans, and UTF-8 byte accounting for indexed lint. Buffered lint keeps
 scan to recover decoded duplicate-member facts without revalidating scalar
 grammar or allocating paths for ordinary values. Invalid JSON emits only
 `parse/invalid-json`.
+
+Indexed file execution removes the need to materialize the whole document as
+one JavaScript string. A rule can still request an individual scalar or object
+that exceeds JavaScript representation capacity; construction-time and lazy
+materialization failures both produce `parse/source-too-large`.
+
+## 0.1.7 file-execution resource policy
+
+The three resource controls address different layers:
+
+- **Representation policy (50 MiB):** `auto` selects indexed file execution at
+  or above this source size to prevent severe per-file buffered amplification.
+- **Concurrency policy (48 MiB):** the worker pool limits the total source bytes
+  of simultaneously admitted buffered lint tasks. A single larger buffered
+  task may run alone. This limits aggregate amplification but is not an RSS
+  ceiling.
+- **Worker lifecycle policy (10 MiB):** after a buffered task at or above this
+  source size, a worker with pending work is replaced before another task.
+  Benchmark sweeps showed that V8 worker isolates retained substantial
+  committed heap after medium and large buffered parsing; replacement reduced
+  accumulation across repeated waves with a small measured wall-time cost. It
+  does not assert immediate operating-system memory reclamation.
+
+These are internal resource-policy constants selected from benchmark sweeps
+and may evolve as real-world corpus evidence improves. Representation governs
+per-file memory behavior, concurrency governs simultaneous buffered memory,
+and worker lifecycle governs retained heap between tasks.
 
 ## Terminal rendering boundary
 

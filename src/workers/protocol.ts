@@ -25,7 +25,13 @@ export interface WorkerLintTask extends WorkerTaskBase {
   readonly plugins: readonly WorkerPluginReference[];
   readonly baseline?: BaselineFileEntry;
   readonly parser: ParserStrategy;
+  /** Internal scheduling metadata; never exposed in FileLintResult. */
+  readonly sourceBytes: number;
+  readonly admission: WorkerLintAdmission;
 }
+
+export type WorkerLintAdmission =
+  'indexed' | 'buffered' | 'buffered-conservative-unknown';
 
 export interface WorkerSnapshotTask extends WorkerTaskBase {
   readonly type: 'snapshot';
@@ -50,6 +56,7 @@ export type WorkerResponse =
       readonly type: 'lint-result';
       readonly taskId: number;
       readonly result: FileLintResult;
+      readonly parserStrategy: Exclude<ParserStrategy, 'auto'>;
     }
   | {
       readonly protocolVersion: 1;

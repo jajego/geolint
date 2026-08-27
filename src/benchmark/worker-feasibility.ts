@@ -260,7 +260,10 @@ async function sampleWorkers(
   }
 }
 
-function productionTask(task: PrototypeWorkerTask): WorkerLintTask {
+function productionTask(
+  task: PrototypeWorkerTask,
+  sourceBytes: number,
+): WorkerLintTask {
   const config = task.config;
   const policy: SerializedResolvedPolicy = {
     projectRoot: config.projectRoot,
@@ -279,6 +282,8 @@ function productionTask(task: PrototypeWorkerTask): WorkerLintTask {
     policy,
     plugins: [],
     parser: task.parser,
+    sourceBytes,
+    admission: task.parser === 'indexed' ? 'indexed' : 'buffered',
     ...(task.baseline ? { baseline: task.baseline } : {}),
   };
 }
@@ -299,7 +304,11 @@ async function sampleProductionWorkers(
     pool = await WorkerPool.create(workerCount);
     const readyMs = performance.now() - readyStartedAt;
     const executionStartedAt = performance.now();
-    const outcomes = await pool.run(tasks.map(productionTask));
+    const outcomes = await pool.run(
+      tasks.map((task) =>
+        productionTask(task, Buffer.byteLength(definition.source)),
+      ),
+    );
     const executionMs = performance.now() - executionStartedAt;
     const results = outcomes.flatMap((outcome) =>
       outcome.type === 'lint-result' ? [outcome.result] : [],

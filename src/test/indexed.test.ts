@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { constants as bufferConstants } from 'node:buffer';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   lintFileWithParser,
   lintGeoJSONText,
   lintGeoJSONTextWithParser,
+  selectFileParserStrategy,
 } from '../engine/lint-input.js';
 import { GeoLintCapabilityError } from '../engine/errors.js';
 import { DiagnosticCollector } from '../engine/diagnostics.js';
@@ -17,9 +19,16 @@ import {
   type SemanticListener,
 } from '../engine/requirements.js';
 import {
+  parseIndexedFileSource,
   parseIndexedSource,
   type IndexedInstrumentation,
 } from '../parser/indexed-source.js';
+import {
+  ByteSourceMaterializationError,
+  fileByteSource,
+} from '../parser/byte-source.js';
+import { definePlugin } from '../plugins/plugin.js';
+import { defineRule } from '../rules/define-rule.js';
 import { createBaseline, serializeBaseline } from '../regression/schema.js';
 import { snapshotBaseline } from '../regression/snapshot.js';
 import { scanGeoJSON, type ScanInstrumentation } from '../scanner/scan.js';
@@ -31,6 +40,64 @@ function stable(result: FileLintResult) {
   void durationMs;
   return value;
 }
+
+test('file auto parser selection uses source requirements, size, and string safety', () => {
+  const ordinary = createExecutionRequirements({ facts: ['featureCount'] });
+  const numericLexemes = createExecutionRequirements({ numericLexemes: true });
+  const featureByteSpans = createExecutionRequirements({
+    featureByteSpans: true,
+  });
+  const threshold = 50 * 1024 * 1024;
+
+  assert.deepEqual(selectFileParserStrategy('auto', ordinary, threshold - 1), {
+    strategy: 'buffered',
+    reason: 'ordinary auto path',
+  });
+  assert.deepEqual(selectFileParserStrategy('auto', ordinary, threshold), {
+    strategy: 'indexed',
+    reason: 'large-file memory safety',
+  });
+  assert.deepEqual(selectFileParserStrategy('auto', ordinary, threshold + 1), {
+    strategy: 'indexed',
+    reason: 'large-file memory safety',
+  });
+  assert.deepEqual(selectFileParserStrategy('auto', numericLexemes, 1), {
+    strategy: 'indexed',
+    reason: 'source-aware requirement',
+  });
+  assert.deepEqual(selectFileParserStrategy('auto', featureByteSpans, 1), {
+    strategy: 'indexed',
+    reason: 'source-aware requirement',
+  });
+  assert.deepEqual(selectFileParserStrategy('buffered', ordinary, threshold), {
+    strategy: 'buffered',
+    reason: 'explicit parser',
+  });
+  assert.deepEqual(selectFileParserStrategy('indexed', ordinary, 1), {
+    strategy: 'indexed',
+    reason: 'explicit parser',
+  });
+  assert.deepEqual(
+    selectFileParserStrategy(
+      'auto',
+      ordinary,
+      bufferConstants.MAX_STRING_LENGTH + 1,
+    ),
+    {
+      strategy: 'indexed',
+      reason: 'JavaScript string safety',
+    },
+  );
+});
+
+test('ordinary auto text remains on the buffered path', async () => {
+  const source = '{"type":"Point","coordinates":[1,2]}';
+  const auto = await lintGeoJSONText(source);
+  const buffered = await lintGeoJSONTextWithParser(source, {
+    parser: 'buffered',
+  });
+  assert.deepEqual(stable(auto), stable(buffered));
+});
 
 async function assertParity(
   source: string,
@@ -124,6 +191,53 @@ function compareDirectCoordinateTraversal(
   );
 }
 
+async function compareFileDirectCoordinateTraversal(
+  path: string,
+  forceGenericIndexedCoordinates: boolean,
+) {
+  const coordinates: unknown[] = [];
+  const listener: SemanticListener = {
+    coordinate(event) {
+      coordinates.push(event);
+    },
+  };
+  const requirements = createExecutionRequirements({
+    facts: [
+      'vertexCount',
+      'geometryStats',
+      'coordinateDimensionStats',
+      'derivedExtent',
+    ],
+    listener,
+  });
+  const instrumentation: ScanInstrumentation = {
+    coordinateTraversals: 0,
+    positionVisits: 0,
+    coordinatePathMaterializations: 0,
+    propertyPathMaterializations: 0,
+  };
+  const diagnostics = new DiagnosticCollector(path);
+  const parsed = parseIndexedFileSource(path, requirements, undefined, 1);
+  try {
+    return {
+      summary: scanGeoJSON(parsed.value, {
+        filePath: path,
+        requirements,
+        listener,
+        diagnostics,
+        instrumentation,
+        forceGenericIndexedCoordinates,
+      }),
+      diagnostics: diagnostics.diagnostics,
+      suppressedDiagnostics: diagnostics.suppressedDiagnostics,
+      coordinates,
+      instrumentation,
+    };
+  } finally {
+    parsed.close();
+  }
+}
+
 test('direct indexed coordinate traversal preserves scanner results', () => {
   const sources = [
     '{"type":"Point","coordinates":[1,2]}',
@@ -187,6 +301,72 @@ test('direct indexed coordinate traversal preserves scanner results', () => {
     return coordinates;
   };
   assert.deepEqual(runCoordinateHook(true), runCoordinateHook(false));
+});
+
+test('byte-direct file coordinates preserve generic semantics across tiny windows', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'geolint-byte-direct-'));
+  try {
+    const path = join(directory, 'map.geojson');
+    const sources = [
+      '{"type":"Point","coordinates":[1e+0,-0]}',
+      '{"type":"MultiPoint","coordinates":[[1,2],[3,4,5]]}',
+      '{"type":"LineString","coordinates":[[1,2],[3,4]]}',
+      '{"type":"LineString","coordinates":[[1,2]]}',
+      '{"type":"MultiLineString","coordinates":[[[1,2],[3,4]],[[5,6]]]}',
+      '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}',
+      '{"type":"Polygon","coordinates":[[[0,0],[1,0],[0,0]]]}',
+      '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[2,0]]]}',
+      '{"type":"MultiPolygon","coordinates":[[[[0,0],[1,0],[1,1],[0,1],[0,0]]]]}',
+      '{"type":"MultiPolygon","coordinates":[[[[0,0],[1,0],[0,0]]]]}',
+      '{"type":"MultiPolygon","coordinates":[[[[0,0],[1,0],[1,1],[0,1],[2,0]]]]}',
+      '{"type":"MultiPoint","coordinates":[[1,"foo,bar"],[1,"foo\\u005dbar"],[1,{"x":[3,4]}]]}',
+    ];
+    for (const source of sources) {
+      await writeFile(path, source);
+      const direct = await compareFileDirectCoordinateTraversal(path, false);
+      const generic = await compareFileDirectCoordinateTraversal(path, true);
+      assert.deepEqual(direct.summary, generic.summary);
+      assert.deepEqual(direct.diagnostics, generic.diagnostics);
+      assert.deepEqual(
+        direct.suppressedDiagnostics,
+        generic.suppressedDiagnostics,
+      );
+      assert.deepEqual(direct.coordinates, generic.coordinates);
+      assert.ok((direct.instrumentation.directCoordinateTraversals ?? 0) > 0);
+      assert.equal(generic.instrumentation.directCoordinateTraversals ?? 0, 0);
+    }
+
+    const lexemeListener: SemanticListener = { coordinateLexeme: () => {} };
+    const lexemeRequirements = createExecutionRequirements({
+      listener: lexemeListener,
+    });
+    await writeFile(path, '{"type":"Point","coordinates":[1e0,2]}');
+    const parsed = parseIndexedFileSource(
+      path,
+      lexemeRequirements,
+      undefined,
+      1,
+    );
+    try {
+      const instrumentation: ScanInstrumentation = {
+        coordinateTraversals: 0,
+        positionVisits: 0,
+        coordinatePathMaterializations: 0,
+        propertyPathMaterializations: 0,
+      };
+      scanGeoJSON(parsed.value, {
+        filePath: path,
+        requirements: lexemeRequirements,
+        listener: lexemeListener,
+        instrumentation,
+      });
+      assert.equal(instrumentation.directCoordinateTraversals ?? 0, 0);
+    } finally {
+      parsed.close();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('indexed coordinate routing follows capabilities', async () => {
@@ -943,6 +1123,119 @@ test('lintFile matches text source semantics and rejects invalid UTF-8 before sc
     );
     assert.equal(invalid.summary, undefined);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('indexed files validate and replay across tiny byte windows', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'geolint-byte-windows-'));
+  try {
+    const path = join(directory, 'map.geojson');
+    const source =
+      '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"é":"\\uD83D\\uDDFA\\uFE0F"},"geometry":{"type":"Point","coordinates":[1e0,-0]}}],"features":[{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[2,3]}}]}';
+    await writeFile(path, source);
+    const events: number[] = [];
+    const requirements = createExecutionRequirements({
+      facts: ['vertexCount'],
+      listener: {
+        coordinate(event) {
+          events.push(event.values[0]!);
+        },
+      },
+    });
+    const parsed = parseIndexedFileSource(path, requirements, undefined, 1);
+    try {
+      const summary = scanGeoJSON(parsed.value, {
+        filePath: path,
+        requirements,
+        listener: {
+          coordinate(event) {
+            events.push(event.values[0]!);
+          },
+        },
+        sourceBytes: parsed.sourceBytes,
+      });
+      assert.equal(summary.totalVertices, 1);
+      assert.deepEqual(events, [2]);
+    } finally {
+      parsed.close();
+    }
+
+    const invalidPath = join(directory, 'invalid.geojson');
+    await writeFile(invalidPath, Buffer.from([0x7b, 0x22, 0xc3, 0x22]));
+    const invalid = await lintFileWithParser(invalidPath, {
+      parser: 'indexed',
+      cwd: directory,
+      config: {},
+    });
+    assert.deepEqual(
+      invalid.diagnostics.map(({ code }) => code),
+      ['parse/invalid-encoding'],
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('indexed materialization errors have the same construction and lazy result', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'geolint-materialization-'));
+  const propertyValuePlugin = definePlugin({
+    meta: { apiVersion: 1 },
+    rules: {
+      materialize: defineRule({
+        meta: {
+          name: 'materialize',
+          schema: null,
+          listensTo: ['propertyValue'],
+        },
+        create() {
+          return { propertyValue() {} };
+        },
+      }),
+    },
+  });
+  const config = {
+    plugins: { test: propertyValuePlugin },
+    rules: { 'test/materialize': 'error' as const },
+  };
+  const root =
+    '{"type":"Feature","properties":{"value":"materialize-me"},"geometry":null}';
+  const lazy =
+    '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"value":"materialize-me"},"geometry":null}]}';
+  const path = join(directory, 'map.geojson');
+  await writeFile(path, root);
+  const probe = fileByteSource(path);
+  const prototype = Object.getPrototypeOf(probe) as {
+    text(start: number, end: number): string;
+  };
+  probe.close();
+  const originalText = prototype.text;
+  let materializedStart = 0;
+  let materializedEnd = 0;
+  prototype.text = function (start, end) {
+    if (start === materializedStart && end === materializedEnd)
+      throw new ByteSourceMaterializationError();
+    return originalText.call(this, start, end);
+  };
+  try {
+    for (const source of [root, lazy]) {
+      await writeFile(path, source);
+      const value = '"materialize-me"';
+      materializedStart = source.lastIndexOf(value);
+      materializedEnd = materializedStart + value.length;
+      const result = await lintFileWithParser(path, {
+        parser: 'indexed',
+        cwd: directory,
+        config,
+      });
+      assert.deepEqual(
+        result.diagnostics.map(({ code }) => code),
+        ['parse/source-too-large'],
+      );
+      assert.equal(result.summary, undefined);
+    }
+  } finally {
+    prototype.text = originalText;
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -29,6 +29,38 @@ export interface CompiledRegression {
   finish(summary: FileSummary): readonly SkippedPolicy[];
 }
 
+/** Pure source-planning requirements for enabled regression checks. */
+export function planRegressionRequirements(config: RegressionConfig): {
+  readonly facts: readonly SummaryFactName[];
+  readonly exactFileBytes: boolean;
+} {
+  const facts = new Set<SummaryFactName>();
+  const thresholds = config.thresholds;
+  const checks = config.checks;
+  const exactFileBytes = thresholds?.fileSizeIncrease !== undefined;
+  if (thresholds?.totalVerticesIncrease !== undefined) facts.add('vertexCount');
+  if (thresholds?.featureCountDecrease !== undefined) facts.add('featureCount');
+  if (
+    checks?.propertyTypes &&
+    Object.values(checks.propertyTypes).some(enabled)
+  )
+    facts.add('propertyStats');
+  if (checks?.properties && Object.values(checks.properties).some(enabled))
+    facts.add('propertyStats');
+  if (
+    checks?.geometryTypes &&
+    Object.values(checks.geometryTypes).some(enabled)
+  )
+    facts.add('geometryStats');
+  if (
+    enabled(checks?.duplicateIds?.increased) ||
+    enabled(checks?.missingIds?.increased)
+  )
+    facts.add('idStats');
+  if (enabled(checks?.nullGeometries?.increased)) facts.add('geometryStats');
+  return { facts: [...facts], exactFileBytes };
+}
+
 function severity(value: Exclude<RegressionSeverity, 'off'>): Severity {
   return value === 'warn' ? 'warning' : 'error';
 }
@@ -398,7 +430,7 @@ export function compileRegression(
     message: (baseline, current) =>
       countIncreaseMessage('Null geometry count', baseline, current),
   });
-  const facts = [...new Set(policies.flatMap((policy) => policy.requires))];
+  const facts = planRegressionRequirements(config).facts;
   return {
     facts,
     exactFileBytes,

@@ -99,14 +99,27 @@ test('batch operational failures preserve successful target results', async () =
 });
 
 test('stdin bytes use normal text execution and invalid UTF-8 is a finding', async () => {
+  const stdinBytes = Buffer.from(
+    '{"type":"Feature","properties":{"name":"first","name":"second"},"geometry":null}',
+  );
   const valid = await executeLintFiles({
     targets: ['-'],
     noConfig: true,
     stdinFilename: 'public/generated.geojson',
-    stdinBytes: Buffer.from(
-      '{"type":"Feature","properties":{"name":"first","name":"second"},"geometry":null}',
-    ),
+    stdinBytes,
   });
+  const buffered = await executeLintFiles({
+    targets: ['-'],
+    noConfig: true,
+    stdinFilename: 'public/generated.geojson',
+    stdinBytes,
+    parser: 'buffered',
+  });
+  const { durationMs: autoDuration, ...autoFile } = valid.files[0]!;
+  const { durationMs: bufferedDuration, ...bufferedFile } = buffered.files[0]!;
+  void autoDuration;
+  void bufferedDuration;
+  assert.deepEqual(autoFile, bufferedFile);
   assert.equal(valid.files[0]?.filePath, 'public/generated.geojson');
   assert.ok(valid.files[0]?.summary);
   assert.deepEqual(valid.files[0]?.diagnostics[0], {

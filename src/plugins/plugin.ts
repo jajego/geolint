@@ -2,7 +2,7 @@ import { GeoLintConfigError } from '../engine/errors.js';
 import { validatePolicyConfig } from '../config/validate-policy.js';
 import type { RuleDefinition } from '../rules/define-rule.js';
 import type { GeoLintConfigFragment } from '../types/config.js';
-import type { SummaryFactName } from '../types/semantic.js';
+import { ruleEventNames, type SummaryFactName } from '../types/semantic.js';
 
 type PluginRuleDefinition = RuleDefinition<
   // The public plugin container must accept every RuleDefinition specialization.
@@ -32,6 +32,7 @@ const ruleMetaKeys = new Set([
   'name',
   'schema',
   'requires',
+  'listensTo',
   'docs',
   'recommended',
   'performance',
@@ -46,6 +47,7 @@ const facts = new Set<SummaryFactName>([
   'coordinateDimensionStats',
   'derivedExtent',
 ]);
+const ruleEvents = new Set<string>(ruleEventNames);
 
 function fail(path: string, expected: string): never {
   throw new GeoLintConfigError(
@@ -124,6 +126,22 @@ function validateRule(
       if (typeof fact !== 'string' || !facts.has(fact as SummaryFactName)) {
         fail(`${path}.meta.requires`, 'an array of summary fact names');
       }
+    }
+  }
+  const listensTo = Object.getOwnPropertyDescriptor(meta, 'listensTo');
+  if (listensTo) {
+    if (!('value' in listensTo) || !Array.isArray(listensTo.value)) {
+      fail(`${path}.meta.listensTo`, 'an array of semantic event names');
+    }
+    const seen = new Set<string>();
+    for (const event of listensTo.value as unknown[]) {
+      if (
+        typeof event !== 'string' ||
+        !ruleEvents.has(event) ||
+        seen.has(event)
+      )
+        fail(`${path}.meta.listensTo`, 'unique supported semantic event names');
+      seen.add(event);
     }
   }
   const docs = Object.getOwnPropertyDescriptor(meta, 'docs');
@@ -245,6 +263,9 @@ export function stabilizePlugin(plugin: GeoLintPlugin): GeoLintPlugin {
             : {}),
           ...(rule.meta.requires
             ? { requires: Object.freeze([...rule.meta.requires]) }
+            : {}),
+          ...(rule.meta.listensTo
+            ? { listensTo: Object.freeze([...rule.meta.listensTo]) }
             : {}),
         }),
       }),

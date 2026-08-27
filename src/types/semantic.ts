@@ -90,6 +90,19 @@ export type SummaryFactName =
   | 'coordinateDimensionStats'
   | 'derivedExtent';
 
+/** Traversal events a rule may subscribe to during semantic scanning. */
+export const ruleEventNames = [
+  'featureStart',
+  'property',
+  'propertyValue',
+  'coordinate',
+  'coordinateLexeme',
+  'geometry',
+  'feature',
+] as const;
+
+export type RuleEventName = (typeof ruleEventNames)[number];
+
 export type FactStatus = 'complete' | 'partial' | 'not-computed';
 
 export interface FileCompleteness {
